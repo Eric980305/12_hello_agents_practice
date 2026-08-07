@@ -305,6 +305,25 @@ class SQLiteKnowledgeStore:
             )
         return cursor.rowcount
 
+    def delete_owned_knowledge_base(
+        self,
+        *,
+        user_id: str,
+        knowledge_base_id: str,
+    ) -> bool:
+        """Delete one private knowledge-base catalog entry owned by the user."""
+        if knowledge_base_id == "default":
+            raise ValueError("共享知识库不能删除。")
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                DELETE FROM rag_knowledge_bases
+                WHERE user_id = ? AND knowledge_base_id = ?
+                """,
+                (user_id, knowledge_base_id),
+            )
+        return cursor.rowcount > 0
+
     def get_chunk_ids(self, *, namespace: str, document_id: str) -> list[str]:
         with self._connect() as connection:
             rows = connection.execute(

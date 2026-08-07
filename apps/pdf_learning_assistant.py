@@ -326,13 +326,47 @@ html, body { max-width: 100%; min-height: 100%; overflow-x: clip; }
     border-radius: 14px !important;
     background: var(--background-fill-primary) !important;
 }
-.document-table .body-cell[data-col="4"] {
+.document-search-row { gap: 0 !important; }
+.document-search-row .input-container {
+    position: relative !important;
+    width: 100% !important;
+    overflow: hidden !important;
+    border-radius: 12px !important;
+}
+.document-search-row textarea {
+    width: 100% !important;
+    padding-right: 6.25rem !important;
+    border-radius: 12px !important;
+}
+.document-search-row button[data-testid="submit-button"] {
+    position: absolute !important;
+    top: 50% !important;
+    right: 0.3rem !important;
+    z-index: 1 !important;
+    min-width: 5rem !important;
+    height: calc(100% - 0.6rem) !important;
+    margin: 0 !important;
+    transform: translateY(-50%) !important;
+    border-radius: 9px !important;
+}
+.manager-knowledge-base-table { margin-top: 0.5rem !important; }
+.manager-knowledge-base-table .body-cell[data-col="1"] {
+    color: #dc2626 !important;
+    cursor: pointer;
+    font-weight: 650;
+}
+.manager-knowledge-base-table .virtual-row:first-of-type .body-cell[data-col="1"] {
+    color: var(--body-text-color) !important;
+    cursor: default;
+    font-weight: 400;
+}
+.document-table .body-cell[data-col="2"] {
     color: #dc2626 !important;
     cursor: pointer;
     font-weight: 650;
     text-align: center;
 }
-.document-table .body-cell[data-col="4"]:hover {
+.document-table .body-cell[data-col="2"]:hover {
     background: rgba(220, 38, 38, 0.08) !important;
 }
 /*
@@ -605,8 +639,8 @@ html, body { max-width: 100%; min-height: 100%; overflow-x: clip; }
         flex-wrap: nowrap !important;
     }
     #library-layout > * { width: 100% !important; min-width: 0 !important; }
-    .library-row, .filter-row { flex-direction: column !important; }
-    .library-row > *, .filter-row > * {
+    .library-row { flex-direction: column !important; }
+    .library-row > * {
         width: 100% !important;
         min-width: 0 !important;
     }
@@ -623,6 +657,17 @@ html, body { max-width: 100%; min-height: 100%; overflow-x: clip; }
         min-height: 8rem !important;
     }
     .compact-action { max-width: none !important; }
+    .document-search-row {
+        align-items: end !important;
+        flex-direction: row !important;
+        gap: 0 !important;
+    }
+    .document-search-row > :first-child {
+        flex: 1 1 auto !important;
+        width: auto !important;
+        min-width: 0 !important;
+    }
+    .document-search-row button[data-testid="submit-button"] { min-width: 4.75rem !important; }
     .chat-history { height: 340px !important; }
     .chat-controls {
         align-items: stretch !important;
@@ -643,13 +688,41 @@ html, body { max-width: 100%; min-height: 100%; overflow-x: clip; }
     .modal-overlay { align-items: flex-end !important; padding: 0 !important; }
     .modal-card {
         width: 100% !important;
-        max-height: 92vh !important;
+        max-height: calc(100dvh - 1rem) !important;
         border-radius: 18px 18px 0 0 !important;
     }
     .modal-header { align-items: center !important; }
     .modal-header h2 { font-size: 1.15rem !important; }
     .modal-header button { min-width: 6.5rem !important; }
-    .modal-body { overflow-x: auto !important; }
+    .modal-body {
+        width: 100% !important;
+        min-width: 0 !important;
+        overflow-x: hidden !important;
+    }
+    .manager-knowledge-base-table,
+    .manager-knowledge-base-table > div,
+    .manager-knowledge-base-table .table-wrap {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+    }
+    .manager-knowledge-base-table table {
+        width: 100% !important;
+        min-width: 0 !important;
+        table-layout: fixed !important;
+    }
+    .manager-knowledge-base-table th,
+    .manager-knowledge-base-table td {
+        min-width: 0 !important;
+        padding: 0.55rem 0.45rem !important;
+        font-size: 0.84rem !important;
+        white-space: normal !important;
+        overflow-wrap: anywhere !important;
+    }
+    .manager-knowledge-base-table th:first-child,
+    .manager-knowledge-base-table td:first-child { width: 70% !important; }
+    .manager-knowledge-base-table th:last-child,
+    .manager-knowledge-base-table td:last-child { width: 30% !important; }
     .modal-toolbar { flex-direction: column !important; }
     .modal-toolbar > * { width: 100% !important; min-width: 0 !important; }
 }
@@ -727,10 +800,11 @@ class PDFLearningAssistant:
 
     def create_knowledge_base(self, name: str) -> dict[str, str]:
         normalized = self._bounded_text(name, "name", maximum=80)
-        for knowledge_base_id, existing_name in self.knowledge_bases.items():
+        for knowledge_base in self.list_knowledge_bases():
+            knowledge_base_id = knowledge_base["id"]
+            existing_name = knowledge_base["name"]
             if existing_name.casefold() == normalized.casefold():
-                self.select_knowledge_base(knowledge_base_id)
-                return {"id": knowledge_base_id, "name": existing_name}
+                raise ValueError("知识库名称已存在。")
         if self.rag_tool_factory is None or self.knowledge_store is None:
             raise RuntimeError("当前运行方式未配置持久化知识库工厂。")
         knowledge_base_id = hashlib.sha256(
@@ -748,6 +822,49 @@ class PDFLearningAssistant:
         self.current_knowledge_base_id = knowledge_base_id
         return {"id": knowledge_base_id, "name": normalized}
 
+    def delete_knowledge_base(
+        self,
+        knowledge_base_id: str,
+        *,
+        confirmed: bool = False,
+    ) -> dict[str, object]:
+        """Delete an owned knowledge base and all of its indexed resources."""
+        if not confirmed:
+            raise ValueError("删除知识库前必须确认。")
+        if knowledge_base_id == "default":
+            raise ValueError("共享知识库不能删除。")
+        if self.knowledge_store is None:
+            raise RuntimeError("当前运行方式未配置持久化知识库。")
+
+        knowledge_bases = {item["id"]: item for item in self.list_knowledge_bases()}
+        target = knowledge_bases.get(knowledge_base_id)
+        if target is None or target.get("owner_user_id") != self.user_id:
+            raise ValueError("所选知识库不存在或无权删除。")
+
+        documents = self.list_documents(knowledge_base_id)
+        for document in documents:
+            self.delete_document(
+                str(document["document_id"]),
+                knowledge_base_id=knowledge_base_id,
+                confirmed=True,
+            )
+        deleted = self.knowledge_store.delete_owned_knowledge_base(
+            user_id=self.user_id,
+            knowledge_base_id=knowledge_base_id,
+        )
+        if not deleted:
+            raise ValueError("所选知识库不存在或已被删除。")
+        self.rag_tools.pop(knowledge_base_id, None)
+        self.knowledge_bases.pop(knowledge_base_id, None)
+        if self.current_knowledge_base_id == knowledge_base_id:
+            self.current_knowledge_base_id = "default"
+        self.list_knowledge_bases()
+        return {
+            "id": knowledge_base_id,
+            "name": str(target["name"]),
+            "documents_deleted": len(documents),
+        }
+
     def list_knowledge_bases(self) -> list[dict[str, str]]:
         if self.knowledge_store is not None:
             accessible = self.knowledge_store.list_accessible_knowledge_bases(
@@ -758,8 +875,16 @@ class PDFLearningAssistant:
                 item["id"]: item["name"]
                 for item in accessible
             }
+        owner_by_id = {
+            item["id"]: item.get("owner_user_id", self.user_id)
+            for item in accessible
+        } if self.knowledge_store is not None else {}
         return [
-            {"id": knowledge_base_id, "name": name}
+            {
+                "id": knowledge_base_id,
+                "name": name,
+                "owner_user_id": owner_by_id.get(knowledge_base_id, self.user_id),
+            }
             for knowledge_base_id, name in self.knowledge_bases.items()
         ]
 
@@ -1663,23 +1788,19 @@ def create_gradio_app(
         assistant: PDFLearningAssistant,
         knowledge_base_id: str,
         query: str = "",
-        source_type: str = "",
     ) -> tuple[list[list[str]], list[dict[str, str]]]:
         documents = assistant.list_documents(
             None if knowledge_base_id == ALL_KNOWLEDGE_BASES else knowledge_base_id,
             query=query,
-            source_type=source_type,
             include_all=knowledge_base_id == ALL_KNOWLEDGE_BASES,
         )
         rows = [
             [
                 document["name"],
-                str(document["source_type"]).upper(),
                 str(
                     document.get("knowledge_base_name")
-                    or assistant.knowledge_bases[knowledge_base_id]
+                    or assistant.knowledge_bases.get(knowledge_base_id, "")
                 ),
-                assistant._display_time(str(document["created_at"])),
                 "删除",
             ]
             for document in documents
@@ -1700,31 +1821,18 @@ def create_gradio_app(
             max_height=document_table_height(len(rows)),
         )
 
-    def manager_document_state(
+    def manager_knowledge_base_state(
         assistant: PDFLearningAssistant,
-        knowledge_base_id: str,
-    ) -> list[list[str]]:
-        return [
+    ) -> tuple[list[list[str]], list[str]]:
+        knowledge_bases = assistant.list_knowledge_bases()
+        rows = [
             [
-                str(document["name"]),
-                str(document["source_type"]).upper(),
-                assistant._display_time(str(document["created_at"])),
+                item["name"],
+                "不可删除" if item["id"] == "default" else "删除",
             ]
-            for document in assistant.list_documents(knowledge_base_id)
+            for item in knowledge_bases
         ]
-
-    def document_type_update(
-        assistant: PDFLearningAssistant,
-        knowledge_base_id: str,
-    ) -> dict[str, Any]:
-        choices = [("全部类型", "")] + [
-            (item.upper(), item)
-            for item in assistant.list_document_types(
-                None if knowledge_base_id == ALL_KNOWLEDGE_BASES else knowledge_base_id,
-                include_all=knowledge_base_id == ALL_KNOWLEDGE_BASES,
-            )
-        ]
-        return gr.update(choices=choices, value="")
+        return rows, [item["id"] for item in knowledge_bases]
 
     def note_state(
         assistant: PDFLearningAssistant,
@@ -1752,7 +1860,6 @@ def create_gradio_app(
         return (
             document_table_update(document_rows),
             document_ids,
-            document_type_update(assistant, knowledge_base_id),
             note_state(assistant, knowledge_base_id),
         )
 
@@ -1776,7 +1883,6 @@ def create_gradio_app(
             f"当前用户：**{account['username']}**",
             "✅ 资源已就绪。基础检索默认开启，高级检索按需启用。",
             management_knowledge_base_update(assistant),
-            knowledge_base_update(assistant),
             knowledge_base_update(assistant),
             *library_state(assistant, ALL_KNOWLEDGE_BASES),
             gr.Radio(value=normalized_destination),
@@ -1806,10 +1912,8 @@ def create_gradio_app(
                 "",
                 gr.Dropdown(),
                 gr.Dropdown(),
-                gr.Dropdown(),
                 [],
                 [],
-                gr.Dropdown(),
                 [],
                 gr.Radio(value="chat"),
                 "chat",
@@ -1838,10 +1942,8 @@ def create_gradio_app(
                 "",
                 gr.Dropdown(),
                 gr.Dropdown(),
-                gr.Dropdown(),
                 [],
                 [],
-                gr.Dropdown(),
                 [],
                 gr.Radio(value="chat"),
                 "chat",
@@ -1935,45 +2037,51 @@ def create_gradio_app(
             "",
         )
 
-    def create_knowledge_base(name: str, token: str):
+    def create_knowledge_base(
+        name: str,
+        token: str,
+        management_knowledge_base_id: str,
+        qa_knowledge_base_id: str,
+    ):
         assistant = sessions.get(token)
         if assistant is None:
             return (
                 "❌ 助手尚未就绪。", "❌ 助手尚未就绪。",
-                gr.Dropdown(), gr.Dropdown(), gr.Dropdown(), name,
-                [], [], gr.Dropdown(), [], [], gr.Group(visible=True),
+                gr.Dropdown(), gr.Dropdown(), name,
+                document_table_update([]), [], [], [], [], gr.Group(visible=True),
             )
         try:
             result = assistant.create_knowledge_base(name)
+            manager_rows, manager_ids = manager_knowledge_base_state(assistant)
             return (
                 f"✅ 已创建「{result['name']}」。",
                 f"✅ 已创建「{result['name']}」。",
                 management_knowledge_base_update(assistant, result["id"]),
                 knowledge_base_update(assistant, result["id"]),
-                knowledge_base_update(assistant, result["id"]),
                 "",
                 *library_state(assistant, result["id"]),
-                manager_document_state(assistant, result["id"]),
+                manager_rows,
+                manager_ids,
                 gr.Group(visible=False),
             )
         except Exception as error:
-            current = assistant.current_knowledge_base_id
+            manager_rows, manager_ids = manager_knowledge_base_state(assistant)
             return (
                 f"❌ 创建失败：{error}",
                 f"❌ 创建失败：{error}",
-                management_knowledge_base_update(assistant, current),
-                knowledge_base_update(assistant, current),
-                knowledge_base_update(assistant, current),
+                management_knowledge_base_update(assistant, management_knowledge_base_id),
+                knowledge_base_update(assistant, qa_knowledge_base_id),
                 name,
-                *library_state(assistant, current),
-                manager_document_state(assistant, current),
+                *library_state(assistant, management_knowledge_base_id),
+                manager_rows,
+                manager_ids,
                 gr.Group(visible=True),
             )
 
     def select_management_knowledge_base(knowledge_base_id: str, token: str):
         assistant = sessions.get(token)
         if assistant is None:
-            return "❌ 助手尚未就绪。", document_table_update([]), [], gr.Dropdown(), []
+            return "❌ 助手尚未就绪。", document_table_update([]), [], []
         try:
             if knowledge_base_id == ALL_KNOWLEDGE_BASES:
                 name = "所有知识库"
@@ -1981,15 +2089,13 @@ def create_gradio_app(
                 _, name, _ = assistant._knowledge_base_context(knowledge_base_id)
             return f"正在管理「{name}」", *library_state(assistant, knowledge_base_id)
         except Exception as error:
-            return f"❌ 选择失败：{error}", document_table_update([]), [], gr.Dropdown(), []
+            return f"❌ 选择失败：{error}", document_table_update([]), [], []
 
-    def filter_documents(query: str, source_type: str, token: str, knowledge_base_id: str):
+    def filter_documents(query: str, token: str, knowledge_base_id: str):
         assistant = sessions.get(token)
         if assistant is None:
             return document_table_update([]), []
-        rows, document_ids = document_state(
-            assistant, knowledge_base_id, query, source_type
-        )
+        rows, document_ids = document_state(assistant, knowledge_base_id, query)
         return document_table_update(rows), document_ids
 
     def filter_notes(query: str, newest_first: bool, token: str, knowledge_base_id: str):
@@ -2007,24 +2113,73 @@ def create_gradio_app(
         updated = not newest_first
         return updated, filter_notes(query, updated, token, knowledge_base_id)
 
-    def open_knowledge_base_manager(token: str, knowledge_base_id: str):
+    def open_knowledge_base_manager(token: str):
         assistant = sessions.get(token)
         if assistant is None:
-            return gr.Dropdown(), [], gr.Group(visible=True)
-        selected_id = (
-            "default"
-            if knowledge_base_id == ALL_KNOWLEDGE_BASES
-            else knowledge_base_id
-        )
-        return (
-            knowledge_base_update(assistant, selected_id),
-            manager_document_state(assistant, selected_id),
-            gr.Group(visible=True),
-        )
+            return [], [], "❌ 助手尚未就绪。", gr.Group(visible=True)
+        rows, ids = manager_knowledge_base_state(assistant)
+        return rows, ids, "", gr.Group(visible=True)
 
-    def select_manager_knowledge_base(knowledge_base_id: str, token: str):
+    def request_knowledge_base_deletion(
+        knowledge_base_ids: list[str],
+        rows: list[list[str]],
+        evt: gr.SelectData,
+    ):
+        index = evt.index
+        if not isinstance(index, (tuple, list)) or len(index) != 2 or index[1] != 1:
+            return "", "", gr.Group(visible=False)
+        row_index = int(index[0])
+        if row_index >= len(knowledge_base_ids) or row_index >= len(rows):
+            return "", "", gr.Group(visible=False)
+        knowledge_base_id = knowledge_base_ids[row_index]
+        if knowledge_base_id == "default":
+            return "", "共享知识库不能删除。", gr.Group(visible=False)
+        name = str(rows[row_index][0])
+        return knowledge_base_id, f"确认删除知识库「{name}」？", gr.Group(visible=True)
+
+    def delete_selected_knowledge_base(
+        knowledge_base_id: str,
+        token: str,
+        management_knowledge_base_id: str,
+        qa_knowledge_base_id: str,
+    ):
         assistant = sessions.get(token)
-        return manager_document_state(assistant, knowledge_base_id) if assistant else []
+        if assistant is None:
+            return (
+                [], [], "❌ 助手尚未就绪。", gr.Dropdown(), gr.Dropdown(),
+                "❌ 助手尚未就绪。", document_table_update([]), [], [], "",
+                gr.Group(visible=False),
+            )
+        try:
+            removed = assistant.delete_knowledge_base(knowledge_base_id, confirmed=True)
+            next_management = (
+                ALL_KNOWLEDGE_BASES
+                if management_knowledge_base_id == knowledge_base_id
+                else management_knowledge_base_id
+            )
+            next_qa = "default" if qa_knowledge_base_id == knowledge_base_id else qa_knowledge_base_id
+            manager_rows, manager_ids = manager_knowledge_base_state(assistant)
+            return (
+                manager_rows,
+                manager_ids,
+                f"✅ 已删除「{removed['name']}」及其中 {removed['documents_deleted']} 个文档。",
+                management_knowledge_base_update(assistant, next_management),
+                knowledge_base_update(assistant, next_qa),
+                f"正在管理「{'所有知识库' if next_management == ALL_KNOWLEDGE_BASES else assistant.knowledge_bases[next_management]}」",
+                *library_state(assistant, next_management),
+                "",
+                gr.Group(visible=False),
+            )
+        except Exception as error:
+            manager_rows, manager_ids = manager_knowledge_base_state(assistant)
+            return (
+                manager_rows, manager_ids, f"❌ 删除失败：{error}",
+                management_knowledge_base_update(assistant, management_knowledge_base_id),
+                knowledge_base_update(assistant, qa_knowledge_base_id),
+                f"❌ 删除失败：{error}",
+                *library_state(assistant, management_knowledge_base_id),
+                "", gr.Group(visible=False),
+            )
 
     def close_overlay():
         return gr.Group(visible=False)
@@ -2042,20 +2197,19 @@ def create_gradio_app(
     def load_files(file_paths, token: str, knowledge_base_id: str):
         assistant = sessions.get(token)
         if assistant is None:
-            return "❌ 助手尚未就绪。", document_table_update([]), [], gr.Dropdown(), None
+            return "❌ 助手尚未就绪。", document_table_update([]), [], None
         if knowledge_base_id == ALL_KNOWLEDGE_BASES:
             rows, document_ids = document_state(assistant, knowledge_base_id)
             return (
                 "❌ 上传前请先在左侧选择一个具体知识库。",
                 document_table_update(rows),
                 document_ids,
-                document_type_update(assistant, knowledge_base_id),
                 None,
             )
         paths = [file_paths] if isinstance(file_paths, str) else list(file_paths or [])
         if not paths:
             rows, document_ids = document_state(assistant, knowledge_base_id)
-            return "❌ 请选择文件。", document_table_update(rows), document_ids, document_type_update(assistant, knowledge_base_id), None
+            return "❌ 请选择文件。", document_table_update(rows), document_ids, None
         status = "\n\n".join(
             format_document_load_result(
                 assistant.load_document(path, knowledge_base_id=knowledge_base_id)
@@ -2063,7 +2217,7 @@ def create_gradio_app(
             for path in paths
         )
         rows, document_ids = document_state(assistant, knowledge_base_id)
-        return status, document_table_update(rows), document_ids, document_type_update(assistant, knowledge_base_id), None
+        return status, document_table_update(rows), document_ids, None
 
     def request_document_deletion(
         document_ids: list[dict[str, str]],
@@ -2071,7 +2225,7 @@ def create_gradio_app(
         evt: gr.SelectData,
     ):
         index = evt.index
-        if not isinstance(index, (tuple, list)) or len(index) != 2 or index[1] != 4:
+        if not isinstance(index, (tuple, list)) or len(index) != 2 or index[1] != 2:
             return "", "", gr.Group(visible=False)
         row_index = int(index[0])
         if row_index >= len(document_ids) or row_index >= len(rows):
@@ -2086,7 +2240,7 @@ def create_gradio_app(
     ):
         assistant = sessions.get(token)
         if assistant is None:
-            return "❌ 助手尚未就绪。", document_table_update([]), [], gr.Dropdown(), "", gr.Group(visible=False)
+            return "❌ 助手尚未就绪。", document_table_update([]), [], "", gr.Group(visible=False)
         try:
             removed = assistant.delete_document(
                 document_reference["document_id"],
@@ -2094,10 +2248,10 @@ def create_gradio_app(
                 confirmed=True,
             )
             rows, document_ids = document_state(assistant, knowledge_base_id)
-            return f"✅ 已删除：{removed['name']}", document_table_update(rows), document_ids, document_type_update(assistant, knowledge_base_id), "", gr.Group(visible=False)
+            return f"✅ 已删除：{removed['name']}", document_table_update(rows), document_ids, "", gr.Group(visible=False)
         except Exception as error:
             rows, document_ids = document_state(assistant, knowledge_base_id)
-            return f"❌ 删除失败：{error}", document_table_update(rows), document_ids, document_type_update(assistant, knowledge_base_id), "", gr.Group(visible=False)
+            return f"❌ 删除失败：{error}", document_table_update(rows), document_ids, "", gr.Group(visible=False)
 
     def answer_chat(message: str, history, token: str, knowledge_base_id: str, advanced: bool):
         if not message.strip():
@@ -2176,6 +2330,8 @@ def create_gradio_app(
         )
         document_ids = gr.State([])
         pending_document_id = gr.State("")
+        manager_knowledge_base_ids = gr.State([])
+        pending_knowledge_base_id = gr.State("")
         note_newest_first = gr.State(True)
 
         with gr.Group(elem_classes=["auth-shell"]) as auth_shell:
@@ -2271,24 +2427,25 @@ def create_gradio_app(
                         management_status = gr.Markdown("正在管理「所有知识库」")
                     with gr.Column(scale=5, min_width=0, elem_classes=["library-content"]):
                         with gr.Tab("文档"):
-                            with gr.Row(elem_classes=["filter-row"]):
-                                document_search = gr.Textbox(label="搜索文档", placeholder="输入文件名")
-                                document_type_filter = gr.Dropdown(
-                                    label="文件类型",
-                                    choices=[("全部类型", "")],
-                                    value="",
-                                    filterable=True,
-                                    allow_custom_value=True,
+                            with gr.Row(elem_classes=["document-search-row"]):
+                                document_search = gr.Textbox(
+                                    label="搜索文档",
+                                    placeholder="输入文件名",
+                                    scale=1,
+                                    submit_btn="搜索",
+                                    html_attributes={"enterkeyhint": "search"},
                                 )
                             documents_table = gr.Dataframe(
-                                headers=["文件名", "类型", "所属知识库", "添加时间", "操作"],
-                                datatype=["str", "str", "str", "str", "str"],
+                                headers=["文件名", "所属知识库", "操作"],
+                                datatype=["str", "str", "str"],
                                 value=[], type="array", interactive=False, wrap=False,
                                 line_breaks=False, max_height=document_table_height(0),
-                                row_count=0, buttons=[], elem_classes=["document-table"],
+                                row_count=0, buttons=[],
+                                column_widths=["65%", "25%", "10%"],
+                                elem_classes=["document-table"],
                             )
                             source_files = gr.File(
-                                label="上传后自动解析并建立索引",
+                                label="上传文件",
                                 file_types=sorted(SUPPORTED_FILE_SUFFIXES),
                                 type="filepath", file_count="multiple",
                                 elem_classes=["upload-panel"],
@@ -2353,23 +2510,16 @@ def create_gradio_app(
             with gr.Group(visible=False, elem_classes=["modal-overlay"]) as knowledge_base_manager:
                 with gr.Group(elem_classes=["modal-card"]):
                     with gr.Row(elem_classes=["modal-header"]):
-                        gr.Markdown("## 管理知识库\n查看每个知识库中已建立索引的文档。")
+                        gr.Markdown("## 管理知识库\n创建或删除个人知识库。共享知识库不可删除。")
                         open_create_knowledge_base = gr.Button("新建知识库", variant="primary", size="sm", scale=0)
                     with gr.Column(elem_classes=["modal-body"]):
-                        with gr.Row(elem_classes=["modal-toolbar"]):
-                            manager_knowledge_base = gr.Dropdown(
-                                label="选择知识库",
-                                choices=[("共享知识库", "default")],
-                                value="default", interactive=True, filterable=True,
-                                allow_custom_value=True,
-                                show_label=False, container=False,
-                                elem_classes=["manager-selector"],
-                            )
-                            manager_status = gr.Markdown()
-                        manager_documents = gr.Dataframe(
-                            headers=["文档", "类型", "添加时间"],
-                            datatype=["str", "str", "str"], value=[], type="array",
-                            interactive=False, wrap=True, buttons=[],
+                        manager_status = gr.Markdown()
+                        manager_knowledge_bases = gr.Dataframe(
+                            headers=["知识库", "操作"],
+                            datatype=["str", "str"], value=[], type="array",
+                            interactive=False, wrap=False, buttons=[],
+                            column_widths=["72%", "28%"],
+                            elem_classes=["manager-knowledge-base-table"],
                         )
                     with gr.Row(elem_classes=["modal-footer"]):
                         close_knowledge_base_manager = gr.Button(
@@ -2387,6 +2537,14 @@ def create_gradio_app(
                     with gr.Row():
                         cancel_create_knowledge_base = gr.Button("取消")
                         create_knowledge_base_button = gr.Button("创建", variant="primary")
+
+            with gr.Group(visible=False, elem_classes=["modal-overlay"]) as delete_knowledge_base_dialog:
+                with gr.Group(elem_classes=["modal-card", "confirm-card"]):
+                    delete_knowledge_base_confirmation_text = gr.Markdown("确认删除这个知识库？")
+                    gr.Markdown("删除后，该知识库及其中的文档、检索索引都会移除。")
+                    with gr.Row():
+                        cancel_delete_knowledge_base_button = gr.Button("取消")
+                        confirm_delete_knowledge_base_button = gr.Button("确认删除", variant="stop")
 
             with gr.Group(visible=False, elem_classes=["modal-overlay"]) as delete_document_dialog:
                 with gr.Group(elem_classes=["modal-card", "confirm-card"]):
@@ -2407,10 +2565,8 @@ def create_gradio_app(
             startup_status,
             management_knowledge_base,
             qa_knowledge_base,
-            manager_knowledge_base,
             documents_table,
             document_ids,
-            document_type_filter,
             notes_table,
             primary_navigation,
             primary_destination,
@@ -2510,19 +2666,27 @@ def create_gradio_app(
         management_knowledge_base.input(
             select_management_knowledge_base,
             inputs=[management_knowledge_base, session_token],
-            outputs=[management_status, documents_table, document_ids, document_type_filter, notes_table],
+            outputs=[management_status, documents_table, document_ids, notes_table],
             trigger_mode="always_last",
         )
         manage_knowledge_bases_button.click(
             open_knowledge_base_manager,
-            inputs=[session_token, management_knowledge_base],
-            outputs=[manager_knowledge_base, manager_documents, knowledge_base_manager],
+            inputs=session_token,
+            outputs=[
+                manager_knowledge_bases,
+                manager_knowledge_base_ids,
+                manager_status,
+                knowledge_base_manager,
+            ],
         )
-        manager_knowledge_base.input(
-            select_manager_knowledge_base,
-            inputs=[manager_knowledge_base, session_token],
-            outputs=manager_documents,
-            trigger_mode="always_last",
+        manager_knowledge_bases.select(
+            request_knowledge_base_deletion,
+            inputs=[manager_knowledge_base_ids, manager_knowledge_bases],
+            outputs=[
+                pending_knowledge_base_id,
+                delete_knowledge_base_confirmation_text,
+                delete_knowledge_base_dialog,
+            ],
         )
         close_knowledge_base_manager.click(
             close_overlay,
@@ -2538,23 +2702,66 @@ def create_gradio_app(
         )
         create_knowledge_base_button.click(
             create_knowledge_base,
-            inputs=[new_knowledge_base, session_token],
-            outputs=[management_status, manager_status, management_knowledge_base, qa_knowledge_base, manager_knowledge_base, new_knowledge_base, documents_table, document_ids, document_type_filter, notes_table, manager_documents, create_knowledge_base_dialog],
+            inputs=[
+                new_knowledge_base,
+                session_token,
+                management_knowledge_base,
+                qa_knowledge_base,
+            ],
+            outputs=[
+                management_status,
+                manager_status,
+                management_knowledge_base,
+                qa_knowledge_base,
+                new_knowledge_base,
+                documents_table,
+                document_ids,
+                notes_table,
+                manager_knowledge_bases,
+                manager_knowledge_base_ids,
+                create_knowledge_base_dialog,
+            ],
+        )
+        cancel_delete_knowledge_base_button.click(
+            close_overlay,
+            outputs=delete_knowledge_base_dialog,
+        )
+        confirm_delete_knowledge_base_button.click(
+            delete_selected_knowledge_base,
+            inputs=[
+                pending_knowledge_base_id,
+                session_token,
+                management_knowledge_base,
+                qa_knowledge_base,
+            ],
+            outputs=[
+                manager_knowledge_bases,
+                manager_knowledge_base_ids,
+                manager_status,
+                management_knowledge_base,
+                qa_knowledge_base,
+                management_status,
+                documents_table,
+                document_ids,
+                notes_table,
+                pending_knowledge_base_id,
+                delete_knowledge_base_dialog,
+            ],
         )
         source_files.upload(
             load_files,
             inputs=[source_files, session_token, management_knowledge_base],
-            outputs=[load_status, documents_table, document_ids, document_type_filter, source_files],
+            outputs=[load_status, documents_table, document_ids, source_files],
         )
-        document_search.input(
+        document_search.submit(
             filter_documents,
-            inputs=[document_search, document_type_filter, session_token, management_knowledge_base],
+            inputs=[document_search, session_token, management_knowledge_base],
             outputs=[documents_table, document_ids],
             trigger_mode="always_last",
         )
-        document_type_filter.input(
+        document_search.input(
             filter_documents,
-            inputs=[document_search, document_type_filter, session_token, management_knowledge_base],
+            inputs=[document_search, session_token, management_knowledge_base],
             outputs=[documents_table, document_ids],
             trigger_mode="always_last",
         )
@@ -2581,7 +2788,7 @@ def create_gradio_app(
         confirm_delete_button.click(
             delete_selected_document,
             inputs=[pending_document_id, session_token, management_knowledge_base],
-            outputs=[delete_status, documents_table, document_ids, document_type_filter, pending_document_id, delete_document_dialog],
+            outputs=[delete_status, documents_table, document_ids, pending_document_id, delete_document_dialog],
         )
         qa_knowledge_base.input(
             select_qa_knowledge_base,

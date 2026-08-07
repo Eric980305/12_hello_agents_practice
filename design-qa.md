@@ -41,6 +41,17 @@
 
 final result: passed
 
+## 2026-08-08 focused knowledge-base management
+
+- The management dialog now manages only knowledge-base catalog entries. It shows `知识库 / 操作`, marks `共享知识库` as non-deletable, and exposes deletion only for the authenticated user's personal knowledge bases.
+- Personal knowledge-base creation rejects case-insensitive duplicate names. Personal deletion requires a separate confirmation and cascades through indexed vectors, SQLite documents and chunks, retained source files, and finally the catalog entry.
+- Document discovery now has one filename search field. Both Enter and the explicit `搜索` action run the same filter; the file-type filter was removed.
+- The document table uses one shared five-column width contract for its header and data rows, keeping filename, type, knowledge base, added time, and action aligned.
+- Live visual QA covered a 1280×720 desktop viewport and a 389×844 mobile viewport. The mobile manager sheet showed its title, creation action, two-column library list, protected shared row, and red close action without horizontal clipping.
+- Focused tests passed 44 cases; the complete suite passed 119 cases. Python compilation and whitespace validation also passed.
+
+final result: passed
+
 ## 2026-08-07 rounded mobile authentication card
 
 - User reference: `df5bba5aba5608ed52936ff2f242c978.jpg`, showing the square-edged dark mobile login surface.

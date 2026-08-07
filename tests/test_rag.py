@@ -220,6 +220,65 @@ class RAGPipelineTest(unittest.TestCase):
             "共享知识库",
         )
 
+    def test_deletes_only_an_owned_private_knowledge_base(self) -> None:
+        self.documents.ensure_knowledge_base(
+            user_id="__shared__",
+            knowledge_base_id="default",
+            name="共享知识库",
+            namespace="pdf_shared_default",
+        )
+        self.documents.ensure_knowledge_base(
+            user_id="alice",
+            knowledge_base_id="legal",
+            name="法律资料",
+            namespace="kb_alice_legal",
+        )
+        self.documents.ensure_knowledge_base(
+            user_id="bob",
+            knowledge_base_id="finance",
+            name="财务资料",
+            namespace="kb_bob_finance",
+        )
+
+        with self.assertRaisesRegex(ValueError, "共享知识库不能删除"):
+            self.documents.delete_owned_knowledge_base(
+                user_id="alice",
+                knowledge_base_id="default",
+            )
+
+        self.assertFalse(
+            self.documents.delete_owned_knowledge_base(
+                user_id="bob",
+                knowledge_base_id="legal",
+            )
+        )
+        self.assertTrue(
+            self.documents.delete_owned_knowledge_base(
+                user_id="alice",
+                knowledge_base_id="legal",
+            )
+        )
+        self.assertEqual(
+            [
+                item["id"]
+                for item in self.documents.list_accessible_knowledge_bases(
+                    user_id="alice",
+                    shared_owner_id="__shared__",
+                )
+            ],
+            ["default"],
+        )
+        self.assertEqual(
+            [
+                item["id"]
+                for item in self.documents.list_accessible_knowledge_bases(
+                    user_id="bob",
+                    shared_owner_id="__shared__",
+                )
+            ],
+            ["default", "finance"],
+        )
+
     def test_knowledge_base_upsert_updates_the_display_name(self) -> None:
         self.documents.ensure_knowledge_base(
             user_id="__shared__",

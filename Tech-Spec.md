@@ -508,3 +508,11 @@ Build the framework incrementally under the unique import name `hello_agents_fra
 - Scope: local authentication and session restoration, shared/private knowledge-base boundaries, scoped document and note management, Q&A-first navigation, current-session reports, provider-safe embedding batches, responsive UI, visual QA evidence, framework source, examples, infrastructure, and automated tests.
 - Excluded: secrets, virtual environments, caches, SQLite runtime data, uploaded knowledge files, generated learning reports, and external Qdrant/Neo4j state.
 - Verification gate: the complete offline test suite, Python compilation, dependency consistency, whitespace validation, staged-file review, secret-pattern scan, and remote tag verification must pass before the milestone is considered published.
+
+### 2026-08-07 — Focused knowledge-base management
+
+- Management scope: the `管理知识库` dialog manages knowledge-base identities only. It lists the shared and current user's personal libraries, creates personal libraries, and deletes personal libraries after confirmation; document browsing remains on the main knowledge-base page.
+- Safety rules: `共享知识库` cannot be deleted. Names are unique across the knowledge bases visible to the current user using case-insensitive comparison, and duplicate creation returns a visible validation error instead of selecting the existing library. Deleting a personal library first removes every document from Qdrant, SQLite, and retained source storage, then removes its catalog row.
+- Document discovery: the main document view uses one filename search field. Enter and the explicit `搜索` button execute the same scoped search; the file-type filter is removed.
+- Presentation: the document table exposes only file name, owning knowledge base, and operation with stable explicit column widths. The simplified manager dialog is bounded to the mobile viewport and contains no document table.
+- Acceptance: storage and assistant tests cover protected shared deletion, duplicate rejection, personal-library cleanup, selector fallback, and scoped search. The Gradio configuration test verifies the reduced dialog, explicit search actions, removed type filter, and fixed table widths. Desktop and mobile visual QA must confirm alignment and full dialog visibility.

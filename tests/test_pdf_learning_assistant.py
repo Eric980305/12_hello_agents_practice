@@ -268,6 +268,52 @@ class PDFLearningAssistantTest(unittest.TestCase):
         self.assertIn("Transformer 使用自注意力机制", answer)
         self.assertEqual(persisted[0]["name"], "法律法规")
 
+    def test_rejects_duplicate_names_and_deletes_only_owned_private_base(self) -> None:
+        root = Path(self.temporary_directory.name)
+        store = SQLiteKnowledgeStore(root / "catalog-delete.db")
+        tools: dict[str, FakeRAGTool] = {}
+
+        def factory(knowledge_base_id: str) -> FakeRAGTool:
+            return tools.setdefault(
+                knowledge_base_id,
+                FakeRAGTool(
+                    namespace=f"kb_user_{knowledge_base_id}",
+                    path=root / "bases" / knowledge_base_id,
+                ),
+            )
+
+        assistant = PDFLearningAssistant(
+            user_id="user-1",
+            memory_tool=self.memory,
+            rag_tool=FakeRAGTool(path=root / "shared"),
+            rag_tool_factory=factory,
+            knowledge_store=store,
+            llm=self.llm,
+            knowledge_base_path=root / "shared",
+            reports_path=root / "reports-delete",
+        )
+        created = assistant.create_knowledge_base("法律法规")
+        document = root / "contract.txt"
+        document.write_text("contract terms", encoding="utf-8")
+        loaded = assistant.load_document(document, knowledge_base_id=created["id"])
+
+        with self.assertRaisesRegex(ValueError, "名称已存在"):
+            assistant.create_knowledge_base("  法律法规  ")
+        with self.assertRaisesRegex(ValueError, "确认"):
+            assistant.delete_knowledge_base(created["id"])
+        with self.assertRaisesRegex(ValueError, "共享知识库不能删除"):
+            assistant.delete_knowledge_base("default", confirmed=True)
+
+        removed = assistant.delete_knowledge_base(created["id"], confirmed=True)
+
+        self.assertEqual(removed["documents_deleted"], 1)
+        self.assertEqual(assistant.current_knowledge_base_id, "default")
+        self.assertNotIn(
+            created["id"],
+            {item["id"] for item in assistant.list_knowledge_bases()},
+        )
+        self.assertNotIn(loaded["document_id"], tools[created["id"]].document_ids)
+
     def test_reuses_existing_index_without_reprocessing_or_duplicate_memory(self) -> None:
         first = self.assistant.load_document(self.pdf_path)
         first_memory_count = len(self.memory.calls)
@@ -686,32 +732,20 @@ class AssistantSessionsTest(unittest.TestCase):
                     and component.get("props", {}).get("label") == "选择知识库"
                     and component.get("props", {}).get("value") == ALL_KNOWLEDGE_BASES
                 )
-                manager_selector = next(
-                    component
-                    for component in components
-                    if "manager-selector"
-                    in component.get("props", {}).get("elem_classes", [])
-                )
                 text_filters = [
                     component
                     for component in components
                     if component.get("props", {}).get("label")
                     in {"搜索文档", "搜索笔记"}
                 ]
-                dropdown_filters = [
-                    component
-                    for component in components
-                    if component.get("props", {}).get("label")
-                    in {"文件类型", "问答知识库"}
-                ]
-                for component in [library_selector, manager_selector, *dropdown_filters]:
+                for component in [library_selector]:
                     events = events_by_component.get(component["id"], set())
-                    self.assertIn("input", events)
+                    self.assertTrue(events)
                     self.assertNotIn("select", events)
                     self.assertNotIn("change", events)
                 for component in text_filters:
                     events = events_by_component.get(component["id"], set())
-                    self.assertIn("input", events)
+                    self.assertTrue(events.intersection({"input", "submit"}))
                     self.assertNotIn("change", events)
                 button_values = {
                     component.get("props", {}).get("value")
@@ -722,6 +756,13 @@ class AssistantSessionsTest(unittest.TestCase):
                 self.assertNotIn("加载文档", button_values)
                 self.assertIn("管理知识库", button_values)
                 self.assertIn("新建知识库", button_values)
+                document_search_props = next(
+                    component.get("props", {})
+                    for component in components
+                    if component["type"] == "textbox"
+                    and component.get("props", {}).get("label") == "搜索文档"
+                )
+                self.assertEqual(document_search_props.get("submit_btn"), "搜索")
                 self.assertIn("关闭", button_values)
                 self.assertIn("确认删除", button_values)
                 self.assertIn("↕", button_values)
@@ -735,7 +776,7 @@ class AssistantSessionsTest(unittest.TestCase):
                     if component["type"] == "dataframe"
                 }
                 self.assertIn(
-                    ("文件名", "类型", "所属知识库", "添加时间", "操作"),
+                    ("文件名", "所属知识库", "操作"),
                     dataframe_headers,
                 )
                 self.assertIn(
@@ -743,7 +784,7 @@ class AssistantSessionsTest(unittest.TestCase):
                     dataframe_headers,
                 )
                 self.assertIn(
-                    ("文档", "类型", "添加时间"),
+                    ("知识库", "操作"),
                     dataframe_headers,
                 )
                 self.assertNotIn(
@@ -799,17 +840,23 @@ class AssistantSessionsTest(unittest.TestCase):
                     for component in components
                     if component["type"] == "dropdown"
                     and component.get("props", {}).get("label")
-                    in {"选择知识库", "文件类型", "知识库"}
+                    in {"选择知识库", "知识库"}
                 ]
                 self.assertTrue(finite_dropdowns)
                 dynamic_dropdowns = [
                     item
                     for item in finite_dropdowns
-                    if item.get("label") in {"选择知识库", "文件类型"}
+                    if item.get("label") == "选择知识库"
                 ]
                 self.assertTrue(dynamic_dropdowns)
                 self.assertTrue(
                     all(item.get("allow_custom_value") is True for item in dynamic_dropdowns)
+                )
+                self.assertFalse(
+                    any(
+                        component.get("props", {}).get("label") == "文件类型"
+                        for component in components
+                    )
                 )
                 self.assertIn("event.composedPath()", APP_JS)
                 self.assertIn("findInPath('.wrap')", APP_JS)
@@ -841,7 +888,7 @@ class AssistantSessionsTest(unittest.TestCase):
                     for component in components
                     if component["type"] == "file"
                     and component.get("props", {}).get("label")
-                    == "上传后自动解析并建立索引"
+                    == "上传文件"
                 )
                 upload_dependency = next(
                     dependency

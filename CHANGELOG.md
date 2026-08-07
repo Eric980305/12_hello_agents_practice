@@ -4,6 +4,15 @@ This file records user-visible milestones for `12_hello_agents_practice`.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-08
+
+### Changed
+
+- Simplified knowledge-base management and added safe deletion for personal knowledge bases.
+- Refined document search, table layout, uploader spacing, dialogs, and responsive presentation.
+- Reduced the document table to the user-facing fields: file name, owning knowledge base, and operation.
+- Strengthened shared/private knowledge-base isolation and repeated-switching regression coverage.
+
 ## [0.2.0] - 2026-08-07
 
 ### Milestone: Multi-user Intelligent Knowledge Base
