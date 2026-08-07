@@ -4,7 +4,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from hello_agents_practice import (
+from hello_agents_framework import (
     EpisodicMemory,
     MemoryManager,
     MemoryTool,

@@ -1,6 +1,6 @@
 import unittest
 
-from hello_agents_practice.tools import CalculatorTool, FunctionTool, Tool, ToolRegistry
+from hello_agents_framework.tools import CalculatorTool, FunctionTool, Tool, ToolRegistry
 
 
 class EchoTool(Tool):

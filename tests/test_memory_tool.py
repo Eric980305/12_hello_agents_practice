@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from hello_agents_practice import MemoryManager, MemoryTool, ToolRegistry
+from hello_agents_framework import MemoryManager, MemoryTool, ToolRegistry
 
 
 class MemoryToolTest(unittest.TestCase):

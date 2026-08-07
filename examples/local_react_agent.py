@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 
 from examples.local_simple_agent import ROOT_DIR, create_llm
-from hello_agents_practice import CalculatorTool, Config, ReActAgent, ToolRegistry
+from hello_agents_framework import CalculatorTool, Config, ReActAgent, ToolRegistry
 
 
 def main() -> None:

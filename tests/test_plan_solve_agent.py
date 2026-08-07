@@ -1,6 +1,6 @@
 import unittest
 
-from hello_agents_practice import PlanAndSolveAgent
+from hello_agents_framework import PlanAndSolveAgent
 
 
 class FakeLLM:

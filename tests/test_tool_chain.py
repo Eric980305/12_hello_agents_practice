@@ -1,6 +1,6 @@
 import unittest
 
-from hello_agents_practice import CalculatorTool, Tool, ToolChain, ToolChainManager, ToolRegistry
+from hello_agents_framework import CalculatorTool, Tool, ToolChain, ToolChainManager, ToolRegistry
 
 
 class CaptureTool(Tool):

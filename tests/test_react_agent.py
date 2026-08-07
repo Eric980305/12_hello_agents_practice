@@ -1,6 +1,6 @@
 import unittest
 
-from hello_agents_practice import (
+from hello_agents_framework import (
     CalculatorTool,
     ReActAgent,
     ToolRegistry,

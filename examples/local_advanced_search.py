@@ -3,7 +3,7 @@ import argparse
 from dotenv import load_dotenv
 
 from examples.local_simple_agent import ROOT_DIR
-from hello_agents_practice import SearchTool, ToolRegistry
+from hello_agents_framework import SearchTool, ToolRegistry
 
 
 def parse_args() -> argparse.Namespace:

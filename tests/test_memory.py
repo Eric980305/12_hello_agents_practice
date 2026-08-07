@@ -3,13 +3,13 @@ from datetime import timedelta
 
 from pydantic import ValidationError
 
-from hello_agents_practice.memory import (
+from hello_agents_framework.memory import (
     MemoryConfig,
     MemoryItem,
     MemoryManager,
     WorkingMemory,
 )
-from hello_agents_practice.memory.base import utc_now
+from hello_agents_framework.memory.base import utc_now
 
 
 class MemoryContractTest(unittest.TestCase):

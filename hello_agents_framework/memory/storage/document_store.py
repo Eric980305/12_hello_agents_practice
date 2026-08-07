@@ -226,7 +226,9 @@ class SQLiteKnowledgeStore:
                 INSERT INTO rag_knowledge_bases (
                     user_id, knowledge_base_id, name, namespace, created_at
                 ) VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT (user_id, knowledge_base_id) DO NOTHING
+                ON CONFLICT (user_id, knowledge_base_id) DO UPDATE SET
+                    name = excluded.name,
+                    namespace = excluded.namespace
                 """,
                 (
                     user_id,
@@ -256,6 +258,52 @@ class SQLiteKnowledgeStore:
             }
             for row in rows
         ]
+
+    def list_accessible_knowledge_bases(
+        self,
+        *,
+        user_id: str,
+        shared_owner_id: str,
+    ) -> list[dict[str, str]]:
+        """List the shared library followed by libraries owned by one user."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT user_id, knowledge_base_id, name, namespace
+                FROM rag_knowledge_bases
+                WHERE (user_id = ? AND knowledge_base_id = 'default')
+                   OR (user_id = ? AND knowledge_base_id <> 'default')
+                ORDER BY CASE WHEN user_id = ? THEN 0 ELSE 1 END, created_at ASC
+                """,
+                (shared_owner_id, user_id, shared_owner_id),
+            ).fetchall()
+        return [
+            {
+                "id": row["knowledge_base_id"],
+                "name": row["name"],
+                "namespace": row["namespace"],
+                "owner_user_id": row["user_id"],
+            }
+            for row in rows
+        ]
+
+    def rename_knowledge_base_display_name(
+        self,
+        *,
+        old_name: str,
+        new_name: str,
+    ) -> int:
+        """Rename legacy catalog labels without changing IDs or namespaces."""
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE rag_knowledge_bases
+                SET name = ?
+                WHERE name = ?
+                """,
+                (new_name, old_name),
+            )
+        return cursor.rowcount
 
     def get_chunk_ids(self, *, namespace: str, document_id: str) -> list[str]:
         with self._connect() as connection:

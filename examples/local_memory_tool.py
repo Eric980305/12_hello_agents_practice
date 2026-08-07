@@ -1,6 +1,6 @@
 """Run the practice framework's offline Working Memory example."""
 
-from hello_agents_practice import MemoryTool, ToolRegistry
+from hello_agents_framework import MemoryTool, ToolRegistry
 
 
 def main() -> None:

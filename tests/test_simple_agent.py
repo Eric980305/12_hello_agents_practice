@@ -1,7 +1,7 @@
 import unittest
 from typing import Any, cast
 
-from hello_agents_practice import CalculatorTool, Config, HelloAgentsLLM, SimpleAgent
+from hello_agents_framework import CalculatorTool, Config, HelloAgentsLLM, SimpleAgent
 
 
 class FakeLLM:

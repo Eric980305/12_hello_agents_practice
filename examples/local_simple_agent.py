@@ -2,7 +2,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from hello_agents_practice import CalculatorTool, Config, HelloAgentsLLM, SimpleAgent
+from hello_agents_framework import CalculatorTool, Config, HelloAgentsLLM, SimpleAgent
 
 
 ROOT_DIR = Path(__file__).resolve().parents[3]

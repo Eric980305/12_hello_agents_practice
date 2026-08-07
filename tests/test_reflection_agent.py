@@ -1,6 +1,6 @@
 import unittest
 
-from hello_agents_practice import ReflectionAgent
+from hello_agents_framework import ReflectionAgent
 
 
 class FakeLLM:

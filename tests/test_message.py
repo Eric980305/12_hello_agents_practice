@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from pydantic import ValidationError
 
-from hello_agents_practice.core.message import Message
+from hello_agents_framework.core.message import Message
 
 
 class MessageTest(unittest.TestCase):

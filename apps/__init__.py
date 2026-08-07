@@ -1,2 +1,2 @@
-"""Application-layer compositions built on hello_agents_practice."""
+"""Application-layer compositions built on hello_agents_framework."""
 

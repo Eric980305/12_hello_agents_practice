@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from pydantic import ValidationError
 
-from hello_agents_practice.core.config import Config
+from hello_agents_framework.core.config import Config
 
 
 class ConfigTest(unittest.TestCase):

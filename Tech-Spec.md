@@ -2,11 +2,11 @@
 
 ## Objective
 
-Build the framework incrementally under the unique import name `hello_agents_practice`, without shadowing or replacing the official `hello-agents==0.2.0` textbook baseline imported as `hello_agents`.
+Build the framework incrementally under the unique import name `hello_agents_framework`, without shadowing or replacing the official `hello-agents==0.2.0` textbook baseline imported as `hello_agents`.
 
 ## Current Scope
 
-- Preserve the existing OpenAI-compatible implementation in `hello_agents_practice/core/llm.py`.
+- Preserve the existing OpenAI-compatible implementation in `hello_agents_framework/core/llm.py`.
 - Implement `core/message.py` as the framework's validated internal message format.
 - Implement `core/config.py` around the workspace's generic `LLM_*` environment contract without assuming OpenAI or a particular model ID.
 - Implement `core/agent.py` as the abstract execution contract with bounded shared history behavior.
@@ -31,7 +31,7 @@ Build the framework incrementally under the unique import name `hello_agents_pra
 ## Constraints
 
 - Never create or install a local package named `hello_agents`; that import name is reserved for the official PyPI distribution.
-- Keep the local teaching implementation under the unambiguous `hello_agents_practice` import name.
+- Keep the local teaching implementation under the unambiguous `hello_agents_framework` import name.
 - Do not add this project directory to a global `PYTHONPATH`.
 - Do not implement future framework modules ahead of their chapter.
 - Never place credentials in this project; runtime configuration remains in the repository root `.env`.
@@ -39,23 +39,23 @@ Build the framework incrementally under the unique import name `hello_agents_pra
 ## Acceptance Criteria
 
 - The expected framework directory tree exists under this project.
-- `hello_agents_practice/core/llm.py` retains `OpenAICompatibleClient`, `ChatMessage`, and `create_llm_client_from_env`.
-- `hello_agents_practice/core/message.py` restricts roles, creates independent UTC timestamps and metadata, and converts to the OpenAI-compatible role/content shape.
-- `hello_agents_practice/core/config.py` validates model, provider, generation, logging, timeout, and history settings; exported dictionaries omit the API key.
-- `hello_agents_practice/core/agent.py` requires concrete subclasses to implement `run()`, validates agent names and messages, caps history using `Config.max_history_length`, and returns a copied history list.
-- `hello_agents_practice/agents/simple_agent.py` uses the shared Agent contract, executes only registered tools, limits tool iterations, records only the user input and final answer in durable conversation history, and supports streaming only when tool calling is disabled.
-- `hello_agents_practice/agents/react_agent.py` validates its prompt contract and step budget, extracts only the first complete `Thought`/`Action` pair when a provider emits extra pairs, executes at most one registered tool per step, records action/observation traces without persisting model reasoning, and terminates only through a valid `Finish[...]` action or the hard step limit.
-- `hello_agents_practice/agents/reflection_agent.py` merges validated custom prompt overrides with generic defaults, bounds review/refinement iterations, resets and exposes the current run trajectory, stops only on the explicit normalized `无需改进` decision or the iteration limit, and stores only the task and final answer in shared conversation history.
-- `hello_agents_practice/agents/plan_solve_agent.py` parses plans only with `ast.literal_eval`, validates a bounded list of non-empty strings, exposes pending/in-progress/completed/failed step state, stops on the first failed model stage, synthesizes only after all steps complete, and stores the original question and terminal answer in shared history.
-- `hello_agents_practice/agents/function_call_agent.py` uses the existing configured model client and endpoint, sends registered tool JSON schemas through the native `tools` parameter, accepts structured `tool_calls`, validates and converts JSON arguments against the tool schema, executes only registered tools, and appends matching `tool` messages before the next model call.
-- `hello_agents_practice/tools/base.py` defines the minimal tool contract; `registry.py` provides an explicit allowlist and dispatch boundary; `builtin/calculator.py` evaluates only a bounded arithmetic AST and never uses `eval()`.
-- `hello_agents_practice/tools/function.py` validates supported callable signatures, infers a basic JSON Schema or accepts an explicit one, binds mapping arguments to the callable, and converts its return value to the Tool string-result contract. Function registration shares the same duplicate, discovery, schema, execution, and removal behavior as Tool objects.
-- `hello_agents_practice/tools/builtin/search.py` accepts a required string `query`, discovers only backends with both a runtime credential and an importable client, never loads `.env` inside library code, and falls back from Tavily to SerpAPI only in `hybrid` mode. Results identify the backend and preserve source URLs; provider exceptions do not expose credentials or raw response bodies.
-- `hello_agents_practice/tools/chain.py` validates non-empty chains, registered tools, unique output keys, and context references before dispatch. Parameter templates remain mappings; an exact `{key}` reference preserves the referenced value's type, while embedded references interpolate text.
-- `hello_agents_practice/tools/async_executor.py` accepts mapping arguments, limits task count and concurrency, applies a per-call timeout, preserves input ordering, propagates failures, and leaves registry authorization and tool validation on the shared execution path.
+- `hello_agents_framework/core/llm.py` retains `OpenAICompatibleClient`, `ChatMessage`, and `create_llm_client_from_env`.
+- `hello_agents_framework/core/message.py` restricts roles, creates independent UTC timestamps and metadata, and converts to the OpenAI-compatible role/content shape.
+- `hello_agents_framework/core/config.py` validates model, provider, generation, logging, timeout, and history settings; exported dictionaries omit the API key.
+- `hello_agents_framework/core/agent.py` requires concrete subclasses to implement `run()`, validates agent names and messages, caps history using `Config.max_history_length`, and returns a copied history list.
+- `hello_agents_framework/agents/simple_agent.py` uses the shared Agent contract, executes only registered tools, limits tool iterations, records only the user input and final answer in durable conversation history, and supports streaming only when tool calling is disabled.
+- `hello_agents_framework/agents/react_agent.py` validates its prompt contract and step budget, extracts only the first complete `Thought`/`Action` pair when a provider emits extra pairs, executes at most one registered tool per step, records action/observation traces without persisting model reasoning, and terminates only through a valid `Finish[...]` action or the hard step limit.
+- `hello_agents_framework/agents/reflection_agent.py` merges validated custom prompt overrides with generic defaults, bounds review/refinement iterations, resets and exposes the current run trajectory, stops only on the explicit normalized `无需改进` decision or the iteration limit, and stores only the task and final answer in shared conversation history.
+- `hello_agents_framework/agents/plan_solve_agent.py` parses plans only with `ast.literal_eval`, validates a bounded list of non-empty strings, exposes pending/in-progress/completed/failed step state, stops on the first failed model stage, synthesizes only after all steps complete, and stores the original question and terminal answer in shared history.
+- `hello_agents_framework/agents/function_call_agent.py` uses the existing configured model client and endpoint, sends registered tool JSON schemas through the native `tools` parameter, accepts structured `tool_calls`, validates and converts JSON arguments against the tool schema, executes only registered tools, and appends matching `tool` messages before the next model call.
+- `hello_agents_framework/tools/base.py` defines the minimal tool contract; `registry.py` provides an explicit allowlist and dispatch boundary; `builtin/calculator.py` evaluates only a bounded arithmetic AST and never uses `eval()`.
+- `hello_agents_framework/tools/function.py` validates supported callable signatures, infers a basic JSON Schema or accepts an explicit one, binds mapping arguments to the callable, and converts its return value to the Tool string-result contract. Function registration shares the same duplicate, discovery, schema, execution, and removal behavior as Tool objects.
+- `hello_agents_framework/tools/builtin/search.py` accepts a required string `query`, discovers only backends with both a runtime credential and an importable client, never loads `.env` inside library code, and falls back from Tavily to SerpAPI only in `hybrid` mode. Results identify the backend and preserve source URLs; provider exceptions do not expose credentials or raw response bodies.
+- `hello_agents_framework/tools/chain.py` validates non-empty chains, registered tools, unique output keys, and context references before dispatch. Parameter templates remain mappings; an exact `{key}` reference preserves the referenced value's type, while embedded references interpolate text.
+- `hello_agents_framework/tools/async_executor.py` accepts mapping arguments, limits task count and concurrency, applies a per-call timeout, preserves input ordering, propagates failures, and leaves registry authorization and tool validation on the shared execution path.
 - Focused tests live in the dedicated `tests` package and mirror framework modules as the project grows.
 - All other planned Python modules remain placeholders.
-- `import hello_agents` always resolves the official distribution; `import hello_agents_practice` always resolves this project's local implementation when run from project 12.
+- `import hello_agents` always resolves the official distribution; `import hello_agents_framework` always resolves this project's local implementation when run from project 12.
 - Importing the quickstart module performs no API call; running it as a script performs the two tutorial model calls.
 - Offline SimpleAgent tests use fake LLMs and tools; the local live example is separate and consumes model quota only when explicitly run.
 - Offline ReActAgent tests cover successful tool use, malformed and unknown actions, bounded termination, prompt validation, public exports, and durable final-history behavior without consuming model or tool-service quota.
@@ -84,6 +84,34 @@ Build the framework incrementally under the unique import name `hello_agents_pra
 - Knowledge-base assistant completion criteria: uploaded files must match the explicit bounded document/image allowlist and be copied into the selected knowledge base's ingestion root; selecting files immediately performs parsing, chunking, embedding, and indexing, so an upload success means the file is already queryable and no second load action exists; RAG namespaces isolate knowledge bases and users; answers require a selected knowledge base but not a newly uploaded file in the current process; answers must be generated only after source-backed retrieval and include deterministic source labels; Working Memory records the active question while Episodic Memory records durable document, question, and note events; unsupported Semantic/Perceptual Memory must not be claimed; reports write only inside the configured report directory; browser sessions must not share one global assistant instance; and offline tests must exercise the application flow with fakes before any live external run.
 
 ## Change Log
+
+### 2026-08-06 — Shared default library and explicit authentication flow
+
+- Authentication UX: the application has separate login and registration views under one local authentication entry point. Registration validates a minimum six-character password, creates the account, then returns to login without creating an authenticated session; the user must enter credentials to log in.
+- Identity storage: `app_users` remains the authoritative local account table. Passwords are never stored in plaintext and account lookup remains case-insensitive.
+- Knowledge-base ownership: one `default` knowledge base uses a shared system scope and namespace visible to every authenticated account. Knowledge bases created through the UI remain owned by the authenticated user's opaque user ID and are not listed or queryable by other users.
+- Shared-library policy for this learning stage: every authenticated user can read and manage the shared default knowledge base. Role-based administration is intentionally deferred; this shared write boundary must be restricted before untrusted multi-user deployment.
+- Responsive UI: login and registration use one visual surface with transparent Gradio wrappers, a compact mode-switch action, and separate screen states. Mobile must not display nested card borders or compressed heading blocks.
+- Acceptance: offline tests prove password validation, registration without auto-login, shared-default discovery, personal-library isolation, and shared namespace reuse. In-app browser verification covers login → registration → login → application entry and responsive visual states.
+- Verification: all 109 offline tests pass. A real in-app-browser run at desktop and 390×844 widths verified registration, the return-to-login transition, six-character password login, resource initialization, explicit mobile navigation, and visibility of the shared default knowledge base. The temporary QA account and its owner-scoped rows were removed after verification.
+
+### 2026-08-06 — User-scoped learning workspace
+
+- Identity boundary: the application now opens on a local register/login screen. Accounts receive an opaque persistent user ID; passwords are stored only as salted PBKDF2 hashes in SQLite. The authenticated user ID, not a shared browser label, scopes knowledge-base catalogs, retained files, memory, vector namespaces, and generated reports.
+- Resource lifecycle: model, embedding, Qdrant, memory, and RAG resources initialize only after successful authentication. Logging out removes the in-process assistant session without deleting the user's durable data.
+- Navigation and responsive behavior: the three primary destinations use one explicit radio-navigation contract instead of Gradio's collapsible primary tabs. All destinations remain present at mobile widths and the selected view is the only visible primary content group.
+- Learning report: report generation requires at least one real Q&A turn in the current authenticated session. It groups those turns by knowledge base, invokes the LLM once per represented knowledge base using only that group's recorded questions and grounded answers, labels every section with its source knowledge base, and saves the combined JSON artifact under the authenticated user's report directory. Notes, documents, and older sessions are not silently treated as current-session dialogue.
+- UI refinement: the library selector is a compact surface, the manager uses a single header/body/footer hierarchy, and the mobile manager becomes a bottom sheet. Existing document deletion, upload, search, note, and Q&A behavior is preserved.
+- Verification: 108 offline tests pass, dependency consistency and compile checks pass, desktop login/library/manager/Q&A flows render without console errors, and responsive CSS keeps all three primary destinations visible. The current browser harness cannot force a 390px viewport, so mobile behavior is additionally covered by the non-collapsing navigation structure and responsive CSS review.
+
+### 2026-08-06 — Knowledge UI interaction correction
+
+- Scope: preserve the `v0.1.0` page structure, knowledge-base boundaries, callbacks, and the user-owned application title while correcting four visible interaction defects.
+- Dropdown behavior: clicking the arrow of an already-open Gradio dropdown must close that dropdown; opening, filtering, and selecting values continue to use the framework component.
+- Q&A empty state and composer: an empty conversation displays “今天有什么想询问知识库的吗？” in the center. The question field and send action share one visual boundary, with the send button embedded at the field's right edge while remaining a separate accessible button.
+- Mobile navigation: the three primary tabs remain visible at 390px so the active tab label and selected state match desktop behavior instead of leaving “知识库” visible while Q&A is active.
+- Deletion contract: confirmed document deletion removes every indexed Qdrant chunk first, then the authoritative SQLite document and cascading chunk records, and finally the retained source file. Neo4j is not part of the RAG document path. A backend failure is surfaced rather than reported as successful deletion.
+- Verification: focused UI/config tests, RAG deletion tests, full offline tests, desktop browser interaction checks, responsive 390px CSS review, and browser console inspection must pass before handoff. The available browser runtime cannot override its viewport, so mobile verification uses static responsive review rather than claiming a live 390px run.
 
 ### 2026-08-04 — PDF Learning Assistant Application
 
@@ -149,10 +177,10 @@ Build the framework incrementally under the unique import name `hello_agents_pra
 
 - Incident: one 618-chunk PDF caused one remote Embedding request and one local Qdrant upsert per chunk. The application also enabled MQE plus HyDE by default, so an ordinary question made two query-expansion LLM calls before retrieval and the final answer call. This request shape caused avoidable latency and provider request counts.
 - Isolation acceptance: every Q&A, recall, note, document list, and document search operation receives an explicit knowledge-base ID. It resolves one immutable RAG tool/namespace for that operation and never relies on whichever knowledge base another UI callback last selected. Returned RAG evidence must match the selected namespace and, for newly indexed non-default data, the selected knowledge-base metadata.
-- Ingestion acceptance: the Bailian OpenAI-compatible endpoint receives document chunks in batches of at most 25 inputs, matching the provider's synchronous `text-embedding-v4` limit. Qdrant receives bounded point batches. A 618-chunk document therefore requires 25 Embedding requests rather than 618; token billing still reflects the indexed text volume.
+- Ingestion acceptance: the Bailian OpenAI-compatible endpoint receives document chunks in batches of at most 10 inputs, matching the provider's synchronous `text-embedding-v4` limit. Qdrant receives bounded point batches. A 618-chunk document therefore requires 62 Embedding requests rather than 618; token billing still reflects the indexed text volume.
 - Query acceptance: basic retrieval is the default fast path: one query embedding, one namespace-filtered Qdrant query, and one final LLM answer. MQE plus HyDE remains opt-in; expanded query embeddings are batched into one provider request.
 - Library acceptance: knowledge-base management uses a library-detail layout with knowledge-base navigation separated from content. Each selected knowledge base has document and note categories. Documents support name search and file-type filtering; notes support content search, concept filtering, and newest/oldest ordering. Note creation time is persisted by the existing `MemoryItem.created_at` field and displayed in the selected knowledge base only.
-- Verification: 103 deterministic tests passed, including 51-input Embedding batching (25/25/1), bounded Qdrant bulk writes, explicit knowledge-base selection under conflicting shared UI state, namespace isolation, and document/note filtering. `pip check` and Python compilation passed. Browser QA verified document and note surfaces at desktop size and a 390×844 mobile viewport; the temporary port-7861 server was closed, and the user's existing port-7860 app was left untouched.
+- Verification: 103 deterministic tests passed, including 51-input Embedding batching, bounded Qdrant bulk writes, explicit knowledge-base selection under conflicting shared UI state, namespace isolation, and document/note filtering. `pip check` and Python compilation passed. Browser QA verified document and note surfaces at desktop size and a 390×844 mobile viewport; the temporary port-7861 server was closed, and the user's existing port-7860 app was left untouched. The embedding boundary was subsequently corrected and reverified as 10/10/10/10/10/1.
 
 ### 2026-08-04 — Knowledge workspace interaction correction
 
@@ -210,7 +238,7 @@ Build the framework incrementally under the unique import name `hello_agents_pra
 
 ### 2026-08-03 — Practice Memory Stage 2: Persistent Episodic Memory
 
-- Added the minimal reusable persistence boundary under `hello_agents_practice.memory`: `TextEmbedder`, an OpenAI-compatible embedding adapter for the existing Bailian configuration, `SQLiteDocumentStore`, and `QdrantVectorStore`.
+- Added the minimal reusable persistence boundary under `hello_agents_framework.memory`: `TextEmbedder`, an OpenAI-compatible embedding adapter for the existing Bailian configuration, `SQLiteDocumentStore`, and `QdrantVectorStore`.
 - Added `EpisodicMemory` as a composed `BaseMemory` implementation. SQLite is the authoritative complete-record store; Qdrant contains derived vectors and lookup payload only. Semantic retrieval combines vector similarity, recency, and bounded importance weighting, then resolves every hit back through SQLite.
 - Preserved one public lifecycle path: applications inject Working and Episodic stores into `MemoryManager`, and the existing `MemoryTool` handles add/search/update/remove/forget/clear without a second dispatcher. Failed initial vector indexing rolls back the SQLite insert instead of reporting a partially stored memory.
 - Added `examples/local_episodic_memory.py`. It loads the root `.env` only at the application boundary, resets the fixed demo user to avoid duplicate example records, writes to `memory_data/practice_memory.db`, uses a dimension-specific practice Qdrant collection, and consumes two embedding calls when run. It is a manual external integration check, not an automated test.
@@ -220,7 +248,7 @@ Build the framework incrementally under the unique import name `hello_agents_pra
 
 ### 2026-08-03 — Practice Memory Stage 1: Working Memory Vertical Slice
 
-- Added the first local Chapter 8 implementation under `hello_agents_practice.memory`: validated `MemoryItem`, `MemoryConfig`, `MemorySearchResult`, and the shared `BaseMemory` contract; a thread-safe in-process `WorkingMemory`; and a user-scoped `MemoryManager`.
+- Added the first local Chapter 8 implementation under `hello_agents_framework.memory`: validated `MemoryItem`, `MemoryConfig`, `MemorySearchResult`, and the shared `BaseMemory` contract; a thread-safe in-process `WorkingMemory`; and a user-scoped `MemoryManager`.
 - Added `MemoryTool` to the existing tool registry path with one `run()`/`execute()` dispatch flow, a native-tool JSON schema, typed coercion at the trust boundary, explicit Working Memory selection, CRUD, search, summary, statistics, forgetting, and confirmed per-user clear. Public exports now expose the memory types needed by applications.
 - Working Memory enforces aware UTC timestamps, TTL pruning, per-user FIFO capacity, 0–1 importance, isolated metadata, user-scoped operations, and deterministic lexical retrieval whose score prioritizes query relevance before importance. Retrieval score is kept outside the stored record so later semantic retrieval and reranking can replace the strategy without rewriting memory data.
 - Added `examples/local_memory_tool.py`, which runs entirely offline through `ToolRegistry`. Added focused tests for validation, expiry, capacity, ranking, CRUD, forgetting, registry dispatch, user isolation, unsupported future memory types, destructive confirmation, and public behavior.
@@ -252,7 +280,7 @@ Build the framework incrementally under the unique import name `hello_agents_pra
 - Embedding decision: use `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` locally for the first learning loop. It supports Chinese, requires no new credential, produces the configured 384-dimensional vectors, and is reasonable on the current M1/16 GB development machine. DashScope remains a later optional provider when remote throughput or centralized embedding service is required.
 - Verification contract: the default quickstart initializes both databases, writes and retrieves semantic memory, and indexes and retrieves one RAG text without invoking the LLM. `--agent` adds a real provider call and is intentionally opt-in.
 - Security: database ports bind only to `127.0.0.1`; persistent Docker volumes retain data; Neo4j startup requires `NEO4J_PASSWORD` from the root `.env`; no credential is committed. The example loads the root `.env` before importing the official package because version 0.2.0 captures database configuration during module import.
-- Scope: this is the official-package experience path. The from-scratch `hello_agents_practice.memory` and RAG implementation remains a later deep-learning stage.
+- Scope: this is the official-package experience path. The from-scratch `hello_agents_framework.memory` and RAG implementation remains a later deep-learning stage.
 - Verification performed: Compose syntax and both pinned image tags were validated; the multilingual embedding model downloaded and returned a 384-dimensional Chinese vector; spaCy `zh_core_web_sm==3.8.0` and `en_core_web_sm==3.8.0` both load; Qdrant started in OrbStack and its HTTP health request passed; `pip check` and all 54 existing project tests passed. Neo4j and the complete quickstart were not run because the root `.env` does not yet define `NEO4J_PASSWORD`.
 
 ### 2026-07-30 — Dedicated Test Package
@@ -285,10 +313,10 @@ Build the framework incrementally under the unique import name `hello_agents_pra
 
 ### 2026-07-30 — Official and Practice Package Isolation
 
-- Changed: renamed the local source package from `hello_agents` to `hello_agents_practice` and updated every local example, test, documentation path, and mock target.
+- Changed: renamed the local source package from `hello_agents` to `hello_agents_framework` and updated every local example, test, documentation path, and mock target.
 - Reason: import resolution must not depend on the current directory. The official distribution and learning implementation are different codebases and require different import names for reliable IDE navigation, testing, and future packaging.
-- Contract: `hello_agents` means official PyPI 0.2.0 everywhere; `hello_agents_practice` means project 12's local implementation everywhere.
-- Verification: tests must import only `hello_agents_practice`; the local example must resolve that package; the official example and repository root must resolve `hello_agents` from `.venv/site-packages`; no local `hello_agents` directory may remain.
+- Contract: `hello_agents` means official PyPI 0.2.0 everywhere; `hello_agents_framework` means project 12's local implementation everywhere.
+- Verification: tests must import only `hello_agents_framework`; the local example must resolve that package; the official example and repository root must resolve `hello_agents` from `.venv/site-packages`; no local `hello_agents` directory may remain.
 
 ### 2026-07-30 — Framework ReActAgent
 
@@ -306,7 +334,7 @@ Build the framework incrementally under the unique import name `hello_agents_pra
 
 ### 2026-07-31 — Framework ReflectionAgent
 
-- Changed: implemented the framework-native `ReflectionAgent(Agent)`, exported it from `hello_agents_practice`, added focused fake-LLM tests, and added `examples/local_reflection_agent.py` with general and custom-code prompt modes.
+- Changed: implemented the framework-native `ReflectionAgent(Agent)`, exported it from `hello_agents_framework`, added focused fake-LLM tests, and added `examples/local_reflection_agent.py` with general and custom-code prompt modes.
 - Reason: the framework owns this execution pattern, so a duplicate `MyReflectionAgent` wrapper would add no distinct responsibility. The implementation reuses shared LLM, Message, Config, Agent history, and example configuration behavior.
 - Behavior: every run resets its short-term trajectory, generates an initial answer, reviews it, stops only on normalized `无需改进`, otherwise refines within a 1–10 iteration budget, and records only the original task and selected final answer in shared history. Custom prompts may override any subset of the three stages and are checked for unknown stages, empty templates, invalid braces, and unsupported fields.
 - Limitation: model self-review is advisory, not external verification. If the iteration budget ends after a refinement, the latest revision has not received another review; high-risk or factual work still requires deterministic checks, authoritative sources, or human approval.
@@ -368,8 +396,115 @@ Build the framework incrementally under the unique import name `hello_agents_pra
 
 ### 2026-08-05 — Version 0.1.0 Milestone Baseline
 
-- Changed: established `12_hello_agents_framework` as an independent Git repository, added a single-source `VERSION` file and milestone `CHANGELOG.md`, and tagged the verified baseline as `v0.1.0`.
+- Changed: established `12_hello_agents_practice` as an independent Git repository, added a single-source `VERSION` file and milestone `CHANGELOG.md`, and tagged the verified baseline as `v0.1.0`.
 - Reason: the first runnable intelligent knowledge management platform is now valuable enough to preserve as a reproducible rollback point without coupling its history to the other learning projects.
 - Scope: source code, examples, tests, infrastructure configuration, and design records are versioned. Secrets, virtual environments, caches, uploaded knowledge files, SQLite runtime state, and generated learning reports are excluded.
 - Release meaning: `0.1.0` is the first usable learning/customization milestone, not a production-readiness claim. Runtime data requires its own backup because Git protects code history, not database or uploaded-document state.
 - Verification gate: the repository may be tagged only after the deterministic test suite passes, dependency consistency passes, and the staged file list is checked for ignored runtime or secret material.
+
+### 2026-08-06 — Shared-library naming and mobile interaction polish
+
+- Changed: the user-visible `default` library name is now `共享知识库`; the stable internal ID and Qdrant namespace remain unchanged so existing documents and links continue to resolve. Startup performs an idempotent catalog upsert so existing SQLite rows receive the corrected display name.
+- Mobile layout: authentication and application surfaces use the full available viewport, remove nested decorative containers, keep the welcome title on one line, and flatten knowledge-base filters into ordinary controls.
+- Interaction: login and registration states animate on entry, an expanded dropdown closes when its trigger is pressed again, and the knowledge-base manager uses a destructive red close action as requested.
+- Acceptance: unit tests must cover the display-name migration, and live desktop plus 390×844 browser checks must cover login, registration transition, authenticated layout, dropdown toggling, and the manager close action.
+
+### 2026-08-06 — Shared-library collision and session-report correction
+
+- Root cause: historical personal catalog rows also used `knowledge_base_id=default`; converting accessible rows into an ID-keyed mapping let one of those rows overwrite the system-owned shared catalog entry.
+- Changed: the accessible-catalog query now always returns the system-owned `__shared__/default` row and excludes legacy personal `default` rows while retaining every user-owned non-default knowledge base. Startup also migrates all legacy display labels from `默认知识库` to `共享知识库` without changing IDs, namespaces, documents, or vectors.
+- Authentication UI: username and password controls now have explicit light/dark input backgrounds, borders, text colors, and focus states for both Gradio textarea and input elements. The desktop card is wide enough to keep the welcome title on one line; the mobile layout remains bounded to the viewport.
+- Report behavior: the report action summarizes only the current assistant instance's real Q&A turns, groups them by knowledge base, emits an explicitly labeled section per knowledge base, and reports the true turn/library counts.
+- Verification: focused unit tests cover shared-row precedence, legacy-label migration, and multi-library report grouping. Live browser checks cover visible login fields, register-to-login transition, selectable `共享知识库`, and no horizontal overflow at 390×844 and 1440×900.
+
+### 2026-08-06 — Knowledge-base selection and refresh-session recovery
+
+- Selection contract: `所有知识库` is an aggregate read scope, not a writable knowledge base. `共享知识库` and every user-owned knowledge base are concrete choices and remain independently selectable. Uploads require a concrete choice; documents and notes may be listed through the aggregate scope.
+- Root cause: Gradio choice updates could retain an aggregate or stale value after registration or knowledge-base creation, so the visible selector exposed only `所有知识库` and uploads had no concrete namespace. Selector updates now validate the current value against the accessible catalog, choose a safe concrete fallback when required, and return non-filterable interactive controls.
+- Browser event fix: Gradio renders dropdown triggers and popup options through a shadow-tree-backed wrapper. The capture-phase second-click handler must inspect `event.composedPath()`, exempt `listbox`/`option` events, and consume only an already-expanded trigger. This preserves both concrete knowledge-base selection and repeated-trigger close behavior in the library and Q&A selectors.
+- Session contract: the browser stores only an opaque session token in `gr.BrowserState`; the server-side `AssistantSessions` registry remains authoritative. Page reload restores the account with `UserAccountStore.get_by_id()` and rebuilds only that user's accessible knowledge bases. Logout clears both stores. A server process restart still invalidates local sessions by design.
+- End-to-end verification: a temporary user registered and logged in, created a personal knowledge base, uploaded and indexed a text document, viewed it through `所有知识库`, refreshed without losing authentication, retrieved its unique phrase in Q&A, saved a scoped note, generated a knowledge-base-labelled session report, and deleted the document. Post-delete checks found zero authoritative SQLite chunks/documents and zero Qdrant vectors for the namespace; temporary account, catalog, vector, report, and fixture data were removed.
+
+### 2026-08-07 — Mobile authentication surface and theme contrast
+
+- Root cause: the mobile breakpoint still applied main-container padding and retained the desktop card width, exposing the page background as a visible outer ring. Theme-derived input colors also produced insufficient separation from the authentication panel in dark mode.
+- Changed: the mobile application and authentication surface now fill the dynamic viewport without an outer card boundary. Authentication fields use explicit light/dark background, border, text, placeholder, and caret colors while preserving the existing registration and login flow.
+- Acceptance: desktop light and dark modes retain a readable centered card; the narrow layout has no outer ring or horizontal overflow, and username/password fields remain visually identifiable in both themes.
+
+### 2026-08-07 — Edge-to-edge application canvas
+
+- Root cause: the root Gradio container still had a desktop `1180px` maximum width, centered margin, and padding. Its nested main container added more padding, so the browser body remained visible as a white or black ring around the application.
+- Changed: the browser host, Gradio root, and main application canvas now occupy the full viewport with no outer margin or padding. The mobile authentication layer reuses the active Gradio page background instead of introducing a second light or dark surface. Spacing remains the responsibility of the page's internal panels and controls rather than the application shell.
+- Acceptance: authenticated and authentication surfaces reach both viewport edges on desktop and mobile; light and dark themes no longer expose a contrasting outer ring.
+### 2026-08-07 — Bailian embedding batch boundary
+
+- `text-embedding-v4` accepts at most 10 input texts per compatible embeddings request; the practice embedder therefore batches document chunks in groups of 10 instead of 25.
+- This prevents large-document uploads from failing with `400 BadRequestError` before Qdrant and SQLite persistence.
+- Verification covers the provider boundary with a live 10/11-item probe and unit tests for batch splitting and limit validation.
+
+### 2026-08-07 — Shared and personal knowledge-base access contract
+
+- `共享知识库` is one system-owned library with the stable namespace `pdf_shared_default`. Every authenticated user reads and uploads to that same library.
+- A personal library is owned by exactly one user. Its catalog row, source directory, SQLite namespace, and Qdrant namespace are user-scoped; other users must not discover, list, query, upload to, or delete it.
+- `所有知识库` is a read-only aggregate consisting of `共享知识库` plus the current user's personal libraries. It never includes another user's personal library.
+- Duplicate detection is scoped by `(namespace, SHA-256 document ID)`: the same content is rejected as a duplicate inside one library but may be indexed independently in another library.
+- After an upload attempt completes, the file control is cleared while the status remains visible, allowing the next upload without a manual close action.
+- Acceptance requires an isolated two-user regression test covering shared visibility, private isolation, aggregate contents, and per-library duplicate behavior, plus UI configuration verification for upload reset.
+- Verification: the isolated Alice/Bob regression proves shared cross-user visibility, owner-only private discovery, correct `所有知识库` aggregation, and namespace-scoped duplicate handling. The upload callback returns an empty file value after completion. The complete offline suite passes 115 tests; compile, diff-whitespace, and dependency-consistency checks also pass.
+
+### 2026-08-07 — Dynamic document-table height
+
+- Root cause: Gradio 6.22 virtualizes Dataframe rows. CSS `:has()` rules counted only the currently rendered DOM rows and then set that same virtual viewport's height. After visiting a one-row library, the 44 px viewport rendered only one row from a later aggregate result, so the CSS remained self-locked at one row even though the callback returned every document.
+- Changed: document rows retain a deterministic 44 px non-wrapping presentation, but CSS no longer calculates or clamps the virtual body's height from rendered row elements. Every backend callback now returns both the authoritative rows and a `max_height` derived from their count. The viewport grows for zero through seven rows and then scrolls, so the uploader follows short lists without leaving a fixed empty block.
+- Reason: rendered virtual rows are a viewport subset, not the dataset. Presentation code must not use them as a business row count.
+- Verification: the live browser switched `共享知识库 → 切换验收库 → 所有知识库` twice. The visible sets remained 2 shared documents, 1 private document, and all 3 documents respectively on both cycles. Unit coverage fixes the zero/one/two/seven/eight-row height contract, and the Gradio configuration test prevents reintroducing virtual-body row-count selectors.
+- Knowledge-base catalog reads refresh from SQLite before aggregation so a second browser tab immediately sees libraries created and populated in the first tab; an assistant's startup snapshot is not an authorization or discovery source.
+
+### 2026-08-07 — Rounded mobile authentication card
+
+- Changed: the mobile login and registration surface now uses one intentional inset card with a 24 px outer radius, 14 px form-control and primary-action radii, balanced safe-area spacing, and a soft theme-aware shadow. Duplicate Gradio wrapper borders and backgrounds remain flattened.
+- Reason: the previous edge-to-edge rectangular form removed the outer ring but still looked unfinished on a phone. One compact rounded product panel improves hierarchy without reintroducing nested cards.
+- Scope: authentication presentation only. Registration, login, session restoration, account storage, and resource initialization behavior are unchanged.
+- Verification: Python compilation and the focused Gradio construction test pass. Live 390 × 844 light/dark captures report a 366 px card at `x=12`, 24 px outer radius, 14 px input/button radii, readable dark-theme field contrast, and no horizontal overflow. The 1280 px desktop card remains centered at 520 px wide.
+
+### 2026-08-07 — Q&A-first authenticated landing
+
+- Changed: the authenticated application now opens on `智能问答`; `知识库` and `学习统计` remain explicit primary-navigation destinations.
+- Reason: asking the indexed knowledge base is the product's primary user task, while document management is a supporting operation.
+- Verification: the Gradio configuration regression test asserts the `chat` navigation value, and the initial view visibility matches that value.
+
+### 2026-08-07 — Navigation persistence and deterministic library scope
+
+- Refresh contract: an authenticated browser persists its active primary module in browser-local state. Refresh restores that module together with the server session; an invalid or expired session falls back to the login surface.
+- Login contract: explicit logout clears both the server session and the persisted primary module. Every subsequent fresh login opens `智能问答`, regardless of the module used before logout.
+- Selection contract: every library-switch callback resolves against a fresh SQLite catalog snapshot, and only the most recent pending selection may update the rendered document and note state.
+- Access contract: `共享知识库` remains the single system-owned `pdf_shared_default` namespace. `所有知识库` aggregates that shared library plus only the authenticated user's private libraries; another user's private libraries are excluded at the catalog query boundary.
+- Acceptance: unit tests cover navigation normalization, repeated library switching, global shared visibility, and private aggregate isolation. Runtime verification covers refresh persistence and logout/login reset when an authenticated browser session is available.
+- Verification: 116 automated tests pass; browser acceptance confirms that a fresh login opens `智能问答`, refresh preserves `知识库`, and logout followed by login resets to `智能问答`.
+
+### 2026-08-07 — Knowledge-base switch callback consistency
+
+- Callback risk: one user library switch also programmatically resets the document-type dropdown. Gradio's `.change` event fires for that internal update and can launch an unnecessary second table reload.
+- Changed: user-driven knowledge-base selectors and the document-type filter use `.input` with `trigger_mode="always_last"`. Programmatic choice/value updates no longer invoke a second business reload; free-text document and note searches continue to use `.input`.
+- Final rendered-row root cause: the disappearing aggregate rows were caused by the virtual-body CSS self-lock documented in “Dynamic document-table height”, not by SQLite aggregation or missing documents. Removing that CSS was required for the visible result to remain correct after repeated switching.
+- Acceptance: a real authenticated browser must repeatedly switch `所有知识库 → 共享知识库 → 当前用户个人知识库 → 所有知识库`; the final aggregate must equal shared documents plus that user's private documents and exclude other users' private documents.
+
+### 2026-08-07 — Compact document uploader
+
+- Root cause: the document table already ended immediately above the uploader, but Gradio's file-drop component retained a 240 px default height. Its centered drop target looked like a large gap between the document list and upload action.
+- Changed: the uploader is 144 px on desktop and 128 px on mobile while preserving click and drag-and-drop behavior. The real table-to-uploader spacing remains 0.35 rem.
+- Acceptance: with two document rows, the uploader begins within 8 px of the table and the upload panel no longer dominates the document-management viewport.
+
+### 2026-08-07 — Project and framework naming correction
+
+- Naming contract: the Chapter 12 learning project is `12_hello_agents_practice`; its reusable local Python package is `hello_agents_framework`. The official PyPI package remains exclusively `hello_agents`.
+- Migration scope: move the independent Git repository together with its `.git` directory, rename the tracked Python package, and update local imports, mock targets, commands, paths, and project documentation. Preserve unrelated uncommitted work.
+- Compatibility boundary: persistent Qdrant collection names, browser-storage keys, and existing database identifiers keep their current values because they are storage contracts rather than Python import paths. Existing absolute source paths in persisted document metadata must be migrated to the new project directory.
+- Acceptance: the complete offline suite passes from the renamed directory; `hello_agents_framework` resolves locally, `hello_agents` still resolves from the official environment, no source import uses the retired `hello_agents_practice` package name, existing knowledge files remain reachable, and the repository still exposes tag `v0.1.0` after its root directory moves.
+
+### 2026-08-07 — Version 0.2.0 Milestone
+
+- Changed: promoted the verified multi-user intelligent knowledge-base state to version `0.2.0` and prepared the independent repository for its first GitHub publication.
+- Scope: local authentication and session restoration, shared/private knowledge-base boundaries, scoped document and note management, Q&A-first navigation, current-session reports, provider-safe embedding batches, responsive UI, visual QA evidence, framework source, examples, infrastructure, and automated tests.
+- Excluded: secrets, virtual environments, caches, SQLite runtime data, uploaded knowledge files, generated learning reports, and external Qdrant/Neo4j state.
+- Verification gate: the complete offline test suite, Python compilation, dependency consistency, whitespace validation, staged-file review, secret-pattern scan, and remote tag verification must pass before the milestone is considered published.

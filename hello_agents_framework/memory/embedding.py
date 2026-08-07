@@ -52,13 +52,13 @@ class OpenAICompatibleEmbedding:
         self,
         texts: Sequence[str],
         *,
-        batch_size: int = 25,
+        batch_size: int = 10,
     ) -> list[list[float]]:
         """Embed multiple texts using the provider's bounded array input."""
         if not texts:
             return []
-        if not 1 <= batch_size <= 25:
-            raise ValueError("batch_size must be between 1 and 25.")
+        if not 1 <= batch_size <= 10:
+            raise ValueError("batch_size must be between 1 and 10.")
         normalized = [self._required_text(text, "text") for text in texts]
         vectors: list[list[float]] = []
         for start in range(0, len(normalized), batch_size):

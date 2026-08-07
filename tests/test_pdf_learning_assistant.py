@@ -11,18 +11,26 @@ from unittest.mock import Mock, patch
 import gradio as gr
 
 from apps.pdf_learning_assistant import (
+    ALL_KNOWLEDGE_BASES,
+    APP_CSS,
+    APP_HEAD,
+    APP_JS,
     AssistantSessions,
     PENDING_ANSWER,
     PDFLearningAssistant,
     create_gradio_app,
+    document_table_height,
     ensure_server_port_available,
     finish_chat_message,
     format_document_load_result,
     format_initialization_error,
     main,
+    normalize_primary_view,
+    primary_view_visibility,
     stage_chat_message,
 )
-from hello_agents_practice import MemoryItem, RAGSearchResult, SQLiteKnowledgeStore
+from apps.user_store import UserAccountStore
+from hello_agents_framework import MemoryItem, RAGSearchResult, SQLiteKnowledgeStore
 
 
 class FakeMemoryTool:
@@ -131,6 +139,20 @@ class FakeLLM:
 
 
 class ChatInteractionTest(unittest.TestCase):
+    def test_document_table_height_tracks_backend_rows_and_caps_viewport(self) -> None:
+        self.assertEqual(document_table_height(0), 96)
+        self.assertEqual(document_table_height(1), 96)
+        self.assertEqual(document_table_height(2), 140)
+        self.assertEqual(document_table_height(7), 360)
+        self.assertEqual(document_table_height(8), 360)
+
+    def test_primary_view_state_is_normalized_for_refresh_restore(self) -> None:
+        self.assertEqual(normalize_primary_view("library"), "library")
+        self.assertEqual(normalize_primary_view("stats"), "stats")
+        self.assertEqual(normalize_primary_view("unknown"), "chat")
+        self.assertEqual(primary_view_visibility("library"), (True, False, False))
+        self.assertEqual(primary_view_visibility("chat"), (False, True, False))
+
     def test_submission_clears_input_and_renders_pending_answer(self) -> None:
         question, history, pending = stage_chat_message(" 什么是 LLM？ ", [])
 
@@ -279,6 +301,7 @@ class PDFLearningAssistantTest(unittest.TestCase):
 
     def test_note_recall_stats_and_report_use_real_stage_memory_types(self) -> None:
         self.assistant.add_note("Attention connects tokens.", "attention")
+        self.assistant.ask("Attention 如何连接 token？")
         recalled = self.assistant.recall("attention")
         report = self.assistant.generate_report()
 
@@ -288,13 +311,38 @@ class PDFLearningAssistantTest(unittest.TestCase):
         self.assertEqual(note_call[1]["metadata"]["knowledge_base_id"], "default")
         self.assertEqual(
             note_call[1]["metadata"]["knowledge_base_name"],
-            "默认知识库",
+            "共享知识库",
         )
         self.assertIn("Attention connects tokens", recalled)
         self.assertEqual(report["learning_metrics"]["notes_added"], 1)
+        self.assertEqual(report["learning_metrics"]["questions_asked"], 1)
+        self.assertEqual(report["knowledge_base"]["name"], "共享知识库")
+        self.assertTrue(report["learning_summary"])
         report_path = Path(report["report_file"])
         self.assertTrue(report_path.is_file())
         self.assertTrue(report_path.is_relative_to(self.assistant.reports_path))
+
+    def test_report_groups_current_session_real_qa_by_knowledge_base(self) -> None:
+        second_rag = FakeRAGTool(namespace="kb_user_legal")
+        self.assistant.knowledge_bases["legal"] = "法律资料"
+        self.assistant.rag_tools["legal"] = second_rag
+        self.assistant.ask("共享资料讲了什么？", knowledge_base_id="default")
+        self.assistant.ask("法律资料讲了什么？", knowledge_base_id="legal")
+
+        report = self.assistant.generate_report(save_to_file=False)
+
+        self.assertEqual(report["learning_metrics"]["questions_asked"], 2)
+        self.assertEqual(report["learning_metrics"]["knowledge_bases_used"], 2)
+        self.assertNotIn("knowledge_base", report)
+        self.assertEqual(
+            [item["knowledge_base"]["name"] for item in report["knowledge_base_summaries"]],
+            ["共享知识库", "法律资料"],
+        )
+        self.assertIn("## 来源知识库：共享知识库", report["learning_summary"])
+        self.assertIn("## 来源知识库：法律资料", report["learning_summary"])
+        report_prompts = [call[0][1]["content"] for call in self.llm.calls[-2:]]
+        self.assertIn("来源知识库：共享知识库", report_prompts[0])
+        self.assertIn("来源知识库：法律资料", report_prompts[1])
 
     def test_lists_and_confirmedly_deletes_one_knowledge_base_document(self) -> None:
         loaded = self.assistant.load_document(self.pdf_path)
@@ -394,6 +442,142 @@ class PDFLearningAssistantTest(unittest.TestCase):
         self.assertEqual(len(legal_tool.retrieve_calls), 1)
         self.assertEqual(len(tools[finance["id"]].retrieve_calls), 0)
 
+    def test_shared_library_is_global_and_private_libraries_are_owner_scoped(self) -> None:
+        root = Path(self.temporary_directory.name)
+        store = SQLiteKnowledgeStore(root / "two-users.db")
+        store.ensure_knowledge_base(
+            user_id="__shared__",
+            knowledge_base_id="default",
+            name="共享知识库",
+            namespace="pdf_shared_default",
+        )
+        shared_tool = FakeRAGTool(
+            namespace="pdf_shared_default",
+            path=root / "shared",
+        )
+        private_tools: dict[tuple[str, str], FakeRAGTool] = {}
+
+        def build_assistant(user_id: str) -> PDFLearningAssistant:
+            user_scope = user_id.replace("-", "_")
+
+            def factory(knowledge_base_id: str) -> FakeRAGTool:
+                key = (user_id, knowledge_base_id)
+                return private_tools.setdefault(
+                    key,
+                    FakeRAGTool(
+                        namespace=f"kb_{user_scope}_{knowledge_base_id}",
+                        path=root / user_scope / knowledge_base_id,
+                    ),
+                )
+
+            accessible = {
+                item["id"]: item["name"]
+                for item in store.list_accessible_knowledge_bases(
+                    user_id=user_id,
+                    shared_owner_id="__shared__",
+                )
+            }
+            return PDFLearningAssistant(
+                user_id=user_id,
+                memory_tool=FakeMemoryTool(),
+                rag_tool=shared_tool,
+                rag_tool_factory=factory,
+                knowledge_store=store,
+                knowledge_bases=accessible,
+                llm=FakeLLM(),
+                knowledge_base_path=root / user_scope,
+                reports_path=root / "reports" / user_scope,
+            )
+
+        stale_alice = build_assistant("alice")
+        alice = build_assistant("alice")
+        alice_private = alice.create_knowledge_base("Alice 私有库")
+        bob = build_assistant("bob")
+        bob_private = bob.create_knowledge_base("Bob 私有库")
+        alice = build_assistant("alice")
+        bob = build_assistant("bob")
+
+        shared_alice = root / "shared-alice.txt"
+        shared_alice.write_text("shared by alice", encoding="utf-8")
+        shared_bob = root / "shared-bob.txt"
+        shared_bob.write_text("shared by bob", encoding="utf-8")
+        private_alice = root / "private-alice.txt"
+        private_alice.write_text("alice only", encoding="utf-8")
+        private_bob = root / "private-bob.txt"
+        private_bob.write_text("bob only", encoding="utf-8")
+
+        alice.load_document(shared_alice, knowledge_base_id="default")
+        bob.load_document(shared_bob, knowledge_base_id="default")
+        alice.load_document(private_alice, knowledge_base_id=alice_private["id"])
+        bob.load_document(private_bob, knowledge_base_id=bob_private["id"])
+
+        self.assertEqual(
+            {item["name"] for item in stale_alice.list_knowledge_bases()},
+            {"共享知识库", "Alice 私有库"},
+        )
+        self.assertEqual(
+            {item["name"] for item in stale_alice.list_documents(include_all=True)},
+            {"shared-alice.txt", "shared-bob.txt", "private-alice.txt"},
+        )
+
+        self.assertEqual(
+            {item["name"] for item in alice.list_knowledge_bases()},
+            {"共享知识库", "Alice 私有库"},
+        )
+        self.assertEqual(
+            {item["name"] for item in bob.list_knowledge_bases()},
+            {"共享知识库", "Bob 私有库"},
+        )
+        self.assertEqual(
+            {item["name"] for item in alice.list_documents("default")},
+            {"shared-alice.txt", "shared-bob.txt"},
+        )
+        self.assertEqual(
+            {item["name"] for item in bob.list_documents("default")},
+            {"shared-alice.txt", "shared-bob.txt"},
+        )
+        self.assertEqual(
+            {item["name"] for item in alice.list_documents(include_all=True)},
+            {"shared-alice.txt", "shared-bob.txt", "private-alice.txt"},
+        )
+        self.assertEqual(
+            {item["name"] for item in bob.list_documents(include_all=True)},
+            {"shared-alice.txt", "shared-bob.txt", "private-bob.txt"},
+        )
+
+        expected_alice_scopes = {
+            "default": {"shared-alice.txt", "shared-bob.txt"},
+            alice_private["id"]: {"private-alice.txt"},
+        }
+        for knowledge_base_id in (
+            "default",
+            alice_private["id"],
+            "default",
+            alice_private["id"],
+        ):
+            self.assertEqual(
+                {
+                    item["name"]
+                    for item in alice.list_documents(knowledge_base_id)
+                },
+                expected_alice_scopes[knowledge_base_id],
+            )
+        self.assertEqual(
+            {item["name"] for item in alice.list_documents(include_all=True)},
+            {"shared-alice.txt", "shared-bob.txt", "private-alice.txt"},
+        )
+
+        shared_duplicate = alice.load_document(
+            shared_alice,
+            knowledge_base_id="default",
+        )
+        private_copy = alice.load_document(
+            shared_alice,
+            knowledge_base_id=alice_private["id"],
+        )
+        self.assertTrue(shared_duplicate["duplicate"])
+        self.assertFalse(private_copy["duplicate"])
+
 
 class AssistantSessionsTest(unittest.TestCase):
     def test_port_conflict_is_detected_before_startup(self) -> None:
@@ -452,7 +636,9 @@ class AssistantSessionsTest(unittest.TestCase):
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", ResourceWarning)
-            app = create_gradio_app(factory)
+            with tempfile.TemporaryDirectory() as account_root:
+                account_store = UserAccountStore(Path(account_root) / "accounts.db")
+                app = create_gradio_app(factory, user_store=account_store)
             try:
                 self.assertIsInstance(app, gr.Blocks)
                 self.assertEqual(calls, [])
@@ -464,10 +650,69 @@ class AssistantSessionsTest(unittest.TestCase):
                 }
                 self.assertEqual(
                     tabs,
-                    {"🗂️ 知识库", "文档", "笔记", "💬 智能问答", "📊 学习统计"},
+                    {"文档", "笔记"},
                 )
                 component_types = {component["type"] for component in components}
                 self.assertIn("checkbox", component_types)
+                self.assertIn("radio", component_types)
+                primary_navigation = next(
+                    component.get("props", {})
+                    for component in components
+                    if component["type"] == "radio"
+                    and "primary-navigation"
+                    in component.get("props", {}).get("elem_classes", [])
+                )
+                self.assertEqual(primary_navigation.get("value"), "chat")
+                browser_states = {
+                    component.get("props", {}).get("storage_key"):
+                    component.get("props", {}).get("default_value")
+                    for component in components
+                    if component["type"] == "browserstate"
+                }
+                self.assertEqual(
+                    browser_states.get("hello_agents_practice_primary_view"),
+                    "chat",
+                )
+                dependencies = app.get_config_file()["dependencies"]
+                events_by_component: dict[int, set[str]] = {}
+                for dependency in dependencies:
+                    for component_id, event_name in dependency.get("targets", []):
+                        events_by_component.setdefault(component_id, set()).add(event_name)
+
+                library_selector = next(
+                    component
+                    for component in components
+                    if component["type"] == "dropdown"
+                    and component.get("props", {}).get("label") == "选择知识库"
+                    and component.get("props", {}).get("value") == ALL_KNOWLEDGE_BASES
+                )
+                manager_selector = next(
+                    component
+                    for component in components
+                    if "manager-selector"
+                    in component.get("props", {}).get("elem_classes", [])
+                )
+                text_filters = [
+                    component
+                    for component in components
+                    if component.get("props", {}).get("label")
+                    in {"搜索文档", "搜索笔记"}
+                ]
+                dropdown_filters = [
+                    component
+                    for component in components
+                    if component.get("props", {}).get("label")
+                    in {"文件类型", "问答知识库"}
+                ]
+                for component in [library_selector, manager_selector, *dropdown_filters]:
+                    events = events_by_component.get(component["id"], set())
+                    self.assertIn("input", events)
+                    self.assertNotIn("select", events)
+                    self.assertNotIn("change", events)
+                for component in text_filters:
+                    events = events_by_component.get(component["id"], set())
+                    self.assertIn("input", events)
+                    self.assertNotIn("change", events)
                 button_values = {
                     component.get("props", {}).get("value")
                     for component in components
@@ -480,8 +725,10 @@ class AssistantSessionsTest(unittest.TestCase):
                 self.assertIn("关闭", button_values)
                 self.assertIn("确认删除", button_values)
                 self.assertIn("↕", button_values)
+                self.assertIn("登录", button_values)
+                self.assertIn("创建账号", button_values)
+                self.assertIn("退出登录", button_values)
                 self.assertIn("dataframe", component_types)
-                self.assertNotIn("radio", component_types)
                 dataframe_headers = {
                     tuple(component.get("props", {}).get("headers") or [])
                     for component in components
@@ -503,6 +750,12 @@ class AssistantSessionsTest(unittest.TestCase):
                     ("文件名", "类型", "分块数", "添加时间"),
                     dataframe_headers,
                 )
+                # A virtualized Dataframe only renders the rows visible in its
+                # current viewport. CSS must not infer the full result count
+                # from those DOM rows or a one-row library can permanently
+                # crop later aggregate results.
+                self.assertNotIn(".document-table .virtual-body:has", APP_CSS)
+                self.assertNotIn(".document-table .virtual-body:not(:has", APP_CSS)
                 checkboxes = [
                     component.get("props", {})
                     for component in components
@@ -521,6 +774,17 @@ class AssistantSessionsTest(unittest.TestCase):
                 self.assertIn("knowledge-picker-card", component_classes)
                 self.assertIn("chat-controls", component_classes)
                 self.assertIn("chat-input-row", component_classes)
+                self.assertIn("chat-question", component_classes)
+                chatbots = [
+                    component.get("props", {})
+                    for component in components
+                    if component["type"] == "chatbot"
+                ]
+                self.assertEqual(len(chatbots), 1)
+                self.assertEqual(
+                    chatbots[0].get("placeholder"),
+                    "今天有什么想询问知识库的吗？",
+                )
                 all_scope_fields = [
                     component.get("props", {})
                     for component in components
@@ -530,6 +794,40 @@ class AssistantSessionsTest(unittest.TestCase):
                 ]
                 self.assertEqual(len(all_scope_fields), 1)
                 self.assertEqual(all_scope_fields[0].get("label"), "选择知识库")
+                finite_dropdowns = [
+                    component.get("props", {})
+                    for component in components
+                    if component["type"] == "dropdown"
+                    and component.get("props", {}).get("label")
+                    in {"选择知识库", "文件类型", "知识库"}
+                ]
+                self.assertTrue(finite_dropdowns)
+                dynamic_dropdowns = [
+                    item
+                    for item in finite_dropdowns
+                    if item.get("label") in {"选择知识库", "文件类型"}
+                ]
+                self.assertTrue(dynamic_dropdowns)
+                self.assertTrue(
+                    all(item.get("allow_custom_value") is True for item in dynamic_dropdowns)
+                )
+                self.assertIn("event.composedPath()", APP_JS)
+                self.assertIn("findInPath('.wrap')", APP_JS)
+                self.assertIn("findInPath('[role=\"combobox\"]')", APP_JS)
+                self.assertIn("findInPath('[role=\"option\"]')", APP_JS)
+                self.assertIn("composed: true", APP_JS)
+                self.assertIn(".primary-navigation .wrap", APP_CSS)
+                self.assertIn("grid-template-columns: repeat(3", APP_CSS)
+                self.assertIn("--auth-field-background: #ffffff", APP_CSS)
+                self.assertIn("--auth-field-background: #0f172a", APP_CSS)
+                self.assertIn("background: var(--auth-field-background)", APP_CSS)
+                self.assertIn("min-height: 100dvh", APP_CSS)
+                self.assertIn("background: var(--auth-mobile-surface)", APP_CSS)
+                self.assertIn("--auth-mobile-surface: var(--body-background-fill)", APP_CSS)
+                self.assertIn("max-width: none !important", APP_CSS)
+                self.assertIn("background: var(--body-background-fill)", APP_CSS)
+                self.assertNotIn("max-width: 1180px", APP_CSS)
+                self.assertIn("gradio-app", APP_HEAD)
                 knowledge_base_name_fields = [
                     component.get("props", {})
                     for component in components
@@ -538,23 +836,30 @@ class AssistantSessionsTest(unittest.TestCase):
                 ]
                 self.assertEqual(len(knowledge_base_name_fields), 1)
                 dependencies = app.get_config_file()["dependencies"]
+                source_file_id = next(
+                    component["id"]
+                    for component in components
+                    if component["type"] == "file"
+                    and component.get("props", {}).get("label")
+                    == "上传后自动解析并建立索引"
+                )
+                upload_dependency = next(
+                    dependency
+                    for dependency in dependencies
+                    if any(
+                        event_name == "upload"
+                        for _, event_name in dependency.get("targets", [])
+                    )
+                )
+                self.assertIn(source_file_id, upload_dependency.get("outputs", []))
                 self.assertTrue(
                     any(
-                        any(
-                            event_name == "upload"
-                            for _, event_name in dependency.get("targets", [])
-                        )
+                        any(event_name == "load" for _, event_name in dependency.get("targets", []))
                         for dependency in dependencies
                     )
                 )
                 self.assertTrue(
-                    any(
-                        any(
-                            event_name == "load"
-                            for _, event_name in dependency.get("targets", [])
-                        )
-                        for dependency in dependencies
-                    )
+                    any(component["type"] == "browserstate" for component in components)
                 )
             finally:
                 app.close()

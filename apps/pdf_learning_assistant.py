@@ -21,7 +21,7 @@ from uuid import uuid4
 import gradio as gr
 from dotenv import load_dotenv
 
-from hello_agents_practice import (
+from hello_agents_framework import (
     EpisodicMemory,
     LLMQueryExpander,
     MemoryConfig,
@@ -35,11 +35,12 @@ from hello_agents_practice import (
     SQLiteKnowledgeStore,
     WorkingMemory,
 )
-from hello_agents_practice.core.llm import (
+from hello_agents_framework.core.llm import (
     OpenAICompatibleClient,
     create_llm_client_from_env,
 )
-from hello_agents_practice.memory.rag import DocumentProcessor
+from hello_agents_framework.memory.rag import DocumentProcessor
+from .user_store import UserAccountStore
 
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
@@ -52,40 +53,318 @@ SUPPORTED_FILE_SUFFIXES = {
 }
 PENDING_ANSWER = "⏳ 正在检索当前知识库…"
 ALL_KNOWLEDGE_BASES = "__all__"
+SHARED_KNOWLEDGE_OWNER = "__shared__"
+SHARED_KNOWLEDGE_NAMESPACE = "pdf_shared_default"
+PRIMARY_VIEWS = {"chat", "library", "stats"}
+
+
+def normalize_primary_view(value: str | None) -> str:
+    """Return a supported primary module, defaulting to the Q&A surface."""
+    return value if value in PRIMARY_VIEWS else "chat"
+
+
+def primary_view_visibility(value: str | None) -> tuple[bool, bool, bool]:
+    """Map one primary destination to library, chat, and statistics visibility."""
+    destination = normalize_primary_view(value)
+    return (
+        destination == "library",
+        destination == "chat",
+        destination == "stats",
+    )
+
+APP_JS = r"""
+(() => {
+    document.addEventListener("pointerdown", (event) => {
+        // Gradio places dropdown internals in a shadow tree. composedPath()
+        // preserves the real clicked element instead of the retargeted host.
+        const path = event.composedPath();
+        const findInPath = (selector) => path.find(
+            (node) => node instanceof Element && node.matches(selector)
+        );
+
+        // Never consume popup clicks: the component must receive the option
+        // event before it can update the selected knowledge base.
+        if (findInPath('[role="option"]') || findInPath('[role="listbox"]')) return;
+
+        const direct = findInPath('[role="combobox"]');
+        const wrapper = findInPath('.wrap');
+        const combobox = direct || wrapper?.querySelector('[role="combobox"]');
+        if (!combobox || combobox.getAttribute("aria-expanded") !== "true") return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        combobox.dispatchEvent(new KeyboardEvent("keydown", {
+            key: "Escape",
+            code: "Escape",
+            bubbles: true,
+            composed: true,
+            cancelable: true,
+        }));
+        combobox.blur();
+    }, true);
+})()
+"""
+
+APP_HEAD = """
+<style>
+html,
+body,
+gradio-app {
+    width: 100% !important;
+    min-width: 100% !important;
+    min-height: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+@media (max-width: 768px) {
+    .gradio-container {
+        width: 100vw !important;
+        max-width: none !important;
+        min-height: 100dvh !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    .gradio-container > .main {
+        width: 100% !important;
+        min-height: 100dvh !important;
+        padding: 0 !important;
+    }
+}
+</style>
+"""
 
 APP_CSS = """
-html, body {
-    max-width: 100%;
-    overflow-x: clip;
+:root {
+    --auth-field-background: #ffffff;
+    --auth-field-border: #94a3b8;
+    --auth-field-text: #0f172a;
+    --auth-field-placeholder: #64748b;
+    --auth-mobile-surface: var(--body-background-fill);
 }
+.dark {
+    --auth-field-background: #0f172a;
+    --auth-field-border: #64748b;
+    --auth-field-text: #f8fafc;
+    --auth-field-placeholder: #94a3b8;
+    --auth-mobile-surface: var(--body-background-fill);
+}
+html, body { max-width: 100%; min-height: 100%; overflow-x: clip; }
 .gradio-container {
     box-sizing: border-box;
     width: 100% !important;
-    max-width: 1120px !important;
-    margin: 0 auto !important;
+    max-width: none !important;
+    min-height: 100dvh !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: var(--body-background-fill) !important;
 }
-.app-header { margin-bottom: 0.5rem; }
-.question-row { align-items: end; }
+.gradio-container > .main {
+    width: 100% !important;
+    max-width: none !important;
+    min-height: 100dvh !important;
+    padding: 0 !important;
+}
+.app-header h1 { margin-bottom: 0.35rem !important; letter-spacing: -0.03em; }
+.app-topbar { align-items: center !important; margin-bottom: 0.25rem !important; }
+.account-badge { color: var(--body-text-color-subdued); font-size: 0.875rem; }
+.logout-action { min-width: 5rem !important; }
+.auth-shell {
+    width: min(520px, 100%) !important;
+    max-width: 520px !important;
+    align-self: center !important;
+    margin: 9vh auto 0 !important;
+    padding: 0 !important;
+    border: 1px solid var(--border-color-primary) !important;
+    border-radius: 24px !important;
+    background: var(--background-fill-primary) !important;
+    box-shadow: 0 20px 55px rgba(15, 23, 42, 0.12) !important;
+    overflow: hidden !important;
+}
+.auth-shell > .form,
+.auth-shell > .block,
+.auth-panel,
+.auth-panel > .form,
+.auth-panel > .block {
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+.auth-shell > .auth-shell {
+    width: 100% !important;
+    max-width: none !important;
+    align-self: stretch !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+.auth-panel > .auth-panel { padding: 0 !important; }
+.auth-heading {
+    margin: 0 !important;
+    padding: 1.75rem 2rem 1.1rem !important;
+    text-align: center;
+}
+.auth-heading h1 { margin: 0 0 0.4rem !important; font-size: 1.75rem !important; }
+.auth-heading p { margin: 0 !important; color: var(--body-text-color-subdued); }
+.auth-panel {
+    padding: 0 2rem 2rem !important;
+    animation: auth-panel-enter 220ms ease-out both;
+}
+.auth-panel .form {
+    gap: 0.8rem !important;
+    background: transparent !important;
+}
+.auth-panel .form > .block,
+.auth-panel > .block {
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+@keyframes auth-panel-enter {
+    from { opacity: 0; transform: translateX(18px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+.auth-panel label { font-size: 0.875rem !important; font-weight: 650 !important; }
+.auth-panel input,
+.auth-panel textarea {
+    min-height: 3.2rem !important;
+    border: 1px solid var(--auth-field-border) !important;
+    border-radius: 14px !important;
+    background: var(--auth-field-background) !important;
+    color: var(--auth-field-text) !important;
+    caret-color: var(--auth-field-text) !important;
+    box-shadow: inset 0 1px 1px rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+}
+.auth-panel input::placeholder,
+.auth-panel textarea::placeholder {
+    color: var(--auth-field-placeholder) !important;
+    opacity: 1 !important;
+}
+.auth-panel input:focus,
+.auth-panel textarea:focus {
+    border-color: var(--color-accent) !important;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 18%, transparent) !important;
+}
+.auth-mode-row {
+    align-items: center !important;
+    justify-content: flex-end !important;
+    margin: 0.15rem 0 -0.2rem !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+.auth-mode-copy { color: var(--body-text-color-subdued); font-size: 0.8rem; }
+.auth-mode-action {
+    min-width: 3.2rem !important;
+    max-width: 3.2rem !important;
+    padding: 0.15rem 0.3rem !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: var(--color-accent) !important;
+    font-size: 0.8rem !important;
+    box-shadow: none !important;
+}
+.auth-primary {
+    margin-top: 0.25rem !important;
+    border-color: #6366f1 !important;
+    border-radius: 14px !important;
+    background: #6366f1 !important;
+    color: #ffffff !important;
+    min-height: 3.1rem !important;
+    box-shadow: 0 10px 22px rgba(99, 102, 241, 0.22) !important;
+}
+.auth-primary:hover { background: #4f46e5 !important; }
+.auth-back { margin-top: 0.1rem !important; }
+.auth-status:empty { display: none !important; }
+.primary-navigation { margin: 0.5rem 0 1rem !important; }
+.primary-navigation > .form { border: 0 !important; background: transparent !important; }
+.primary-navigation .wrap {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 0.35rem !important;
+    padding: 0.3rem !important;
+    border: 1px solid var(--border-color-primary) !important;
+    border-radius: 12px !important;
+    background: var(--background-fill-secondary) !important;
+}
+.primary-navigation label {
+    justify-content: center !important;
+    min-width: 0 !important;
+    padding: 0.6rem 0.75rem !important;
+    border: 0 !important;
+    border-radius: 9px !important;
+    background: transparent !important;
+    font-weight: 650 !important;
+}
+.primary-navigation label:has(input:checked) {
+    background: var(--background-fill-primary) !important;
+    color: var(--color-accent) !important;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08) !important;
+}
+.primary-navigation input { display: none !important; }
+.library-row { align-items: flex-start !important; }
 .library-content { min-width: 0 !important; }
 .knowledge-picker-card {
-    position: relative;
-    padding: 0.75rem !important;
+    padding: 1rem !important;
+    border: 1px solid var(--border-color-primary) !important;
+    border-radius: 14px !important;
+    background: var(--background-fill-primary) !important;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04) !important;
 }
-.knowledge-card-header { align-items: center; }
+.knowledge-card-header { align-items: center !important; margin-bottom: 0.55rem !important; }
 .knowledge-card-header .prose { margin: 0 !important; }
 .knowledge-card-header button { margin-left: auto !important; }
-.knowledge-selector-row { align-items: end; flex-wrap: nowrap !important; }
-.knowledge-selector-row > :first-child { flex: 1 1 auto !important; }
-.compact-action { min-width: 8rem !important; }
-.document-table td:last-child {
+.compact-action { min-width: 7.5rem !important; border-color: transparent !important; }
+.filter-row {
+    align-items: end !important;
+    padding: 0.9rem !important;
+    border: 1px solid var(--border-color-primary) !important;
+    border-radius: 14px !important;
+    background: var(--background-fill-primary) !important;
+}
+.document-table .body-cell[data-col="4"] {
     color: #dc2626 !important;
     cursor: pointer;
     font-weight: 650;
     text-align: center;
 }
-.document-table td:last-child:hover { background: rgba(220, 38, 38, 0.08) !important; }
+.document-table .body-cell[data-col="4"]:hover {
+    background: rgba(220, 38, 38, 0.08) !important;
+}
+/*
+ * Gradio virtualizes Dataframe rows and caches measured heights by row index.
+ * A wrapped read-only row can therefore retain an obsolete height after the
+ * selected knowledge base changes. Fixed-height rows keep the virtualizer's
+ * offsets deterministic while the viewport still scrolls for long lists.
+ */
+.document-table .virtual-row,
+.document-table .virtual-row .body-cell,
+.document-table .virtual-row .cell-wrap {
+    height: 2.75rem !important;
+    min-height: 2.75rem !important;
+    max-height: 2.75rem !important;
+}
+.document-table .virtual-row .cell-wrap > span {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+.document-table { margin-bottom: 0 !important; }
 .note-toolbar { align-items: end; }
 #note-sort-button { min-width: 3rem !important; max-width: 3rem !important; }
+.upload-panel {
+    height: 9rem !important;
+    min-height: 9rem !important;
+    margin-top: 0.35rem !important;
+}
+.upload-panel > button {
+    height: 100% !important;
+    min-height: 0 !important;
+}
 .chat-shell { gap: 0 !important; }
 .chat-shell > * { margin-bottom: 0 !important; }
 .chat-controls {
@@ -110,14 +389,60 @@ html, body {
 .chat-knowledge-base label { display: none !important; }
 .chat-knowledge-base input { font-size: 0.875rem !important; }
 .chat-composer {
+    overflow: hidden !important;
     border: 1px solid var(--border-color-primary);
     border-radius: 0 0 12px 12px;
     margin-top: -1px;
-    padding: 0.5rem;
+    padding: 0.55rem !important;
+    background: var(--background-fill-secondary) !important;
 }
-.chat-input-row { align-items: stretch !important; gap: 0 !important; }
+.chat-composer > .chat-composer,
+.chat-composer > .form,
+.chat-input-row > .form {
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+.chat-input-row {
+    align-items: stretch !important;
+    gap: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    border: 1px solid var(--border-color-primary) !important;
+    border-radius: 10px !important;
+    background: var(--background-fill-primary) !important;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+}
 .chat-input-row > :first-child { flex: 1 1 auto !important; }
-.chat-input-row textarea { border-radius: 8px 0 0 8px !important; }
+.chat-question,
+.chat-question > .form,
+.chat-question label,
+.chat-question .input-container {
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+.chat-question textarea {
+    min-height: 3.1rem !important;
+    padding: 0.8rem 1rem !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+.chat-history .placeholder {
+    inset: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    color: var(--body-text-color-subdued) !important;
+    font-size: 1rem !important;
+}
 .advanced-toggle {
     flex: 0 0 auto !important;
     width: auto !important;
@@ -131,7 +456,21 @@ html, body {
 .chat-send {
     flex: 0 0 7rem !important;
     min-width: 7rem !important;
-    border-radius: 0 8px 8px 0 !important;
+    min-height: 3.1rem !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-left: 1px solid var(--border-color-primary) !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+}
+.stats-actions { align-items: stretch !important; }
+.stats-actions button { min-height: 3rem !important; }
+.report-output {
+    min-height: 12rem;
+    padding: 1rem !important;
+    border: 1px solid var(--border-color-primary) !important;
+    border-radius: 14px !important;
+    background: var(--background-fill-primary) !important;
 }
 .modal-actions { justify-content: flex-end !important; }
 .modal-actions button { flex: 0 0 8rem !important; min-width: 8rem !important; }
@@ -149,24 +488,139 @@ html, body {
     width: min(880px, 96vw) !important;
     max-height: 86vh !important;
     overflow: auto !important;
-    padding: 1rem !important;
-    border-radius: 14px !important;
+    padding: 0 !important;
+    border: 1px solid var(--border-color-primary) !important;
+    border-radius: 18px !important;
     background: var(--background-fill-primary) !important;
     box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35) !important;
 }
-.confirm-card { width: min(520px, 94vw) !important; }
+.modal-header {
+    align-items: center !important;
+    padding: 1.1rem 1.25rem !important;
+    border-bottom: 1px solid var(--border-color-primary) !important;
+}
+.modal-header .prose { margin: 0 !important; }
+.modal-header h2 { margin: 0 0 0.15rem !important; font-size: 1.25rem !important; }
+.modal-header p { margin: 0 !important; color: var(--body-text-color-subdued); }
+.modal-header button { min-width: 7.5rem !important; }
+.modal-body { padding: 1.1rem 1.25rem !important; }
+.modal-toolbar { align-items: end !important; margin-bottom: 0.75rem !important; }
+.manager-selector,
+.manager-selector .wrap,
+.manager-selector .wrap-inner,
+.manager-selector .secondary-wrap {
+    min-height: 2.75rem !important;
+}
+.manager-selector input { padding: 0.7rem 0.85rem !important; }
+.modal-footer {
+    justify-content: flex-end !important;
+    padding: 0.9rem 1.25rem !important;
+    border-top: 1px solid var(--border-color-primary) !important;
+}
+.manager-close {
+    border-color: #dc2626 !important;
+    background: #dc2626 !important;
+    color: #ffffff !important;
+}
+.manager-close:hover { background: #b91c1c !important; }
+.confirm-card { width: min(520px, 94vw) !important; padding: 1.25rem !important; }
 @media (max-width: 768px) {
-    .gradio-container { padding: 0.75rem !important; }
+    .gradio-container {
+        width: 100vw !important;
+        max-width: none !important;
+        min-height: 100dvh !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: var(--auth-mobile-surface) !important;
+    }
+    .gradio-container > .main {
+        width: 100% !important;
+        min-height: 100dvh !important;
+        padding: 0 !important;
+    }
+    .auth-shell {
+        width: min(430px, calc(100% - 1.5rem)) !important;
+        max-width: 430px !important;
+        min-height: 0 !important;
+        align-self: center !important;
+        justify-content: center !important;
+        margin: max(1rem, env(safe-area-inset-top)) auto max(1rem, env(safe-area-inset-bottom)) !important;
+        padding: 0 !important;
+        border: 1px solid var(--border-color-primary) !important;
+        border-radius: 24px !important;
+        background: var(--background-fill-primary) !important;
+        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18) !important;
+        overflow: hidden !important;
+    }
+    .auth-shell > .auth-shell {
+        min-height: 0 !important;
+        padding: 0 !important;
+    }
+    .auth-heading { padding: 1.5rem 1.25rem 1rem !important; }
+    .auth-heading h1 {
+        white-space: nowrap !important;
+        font-size: clamp(1rem, 4.7vw, 1.35rem) !important;
+        letter-spacing: -0.04em !important;
+    }
+    .auth-panel { padding: 0 1.25rem 1.35rem !important; }
+    .auth-panel .form { gap: 0.8rem !important; }
+    .auth-panel .block,
+    .auth-mode-row,
+    .auth-mode-row > .form {
+        margin: 0 !important;
+        border: 0 !important;
+        background: transparent !important;
+        box-shadow: none !important;
+    }
+    .auth-panel input,
+    .auth-panel textarea {
+        min-height: 3.15rem !important;
+        border-radius: 14px !important;
+    }
+    .auth-primary {
+        min-height: 3.1rem !important;
+        border-radius: 14px !important;
+    }
+    .app-header h1 { font-size: 1.65rem !important; }
+    .app-topbar {
+        align-items: center !important;
+        gap: 0.6rem !important;
+        flex-wrap: nowrap !important;
+    }
+    .app-topbar > * { min-width: 0 !important; }
+    .app-topbar > .column {
+        flex: 0 0 4.5rem !important;
+        width: 4.5rem !important;
+        min-width: 4.5rem !important;
+    }
+    .app-header h1 { white-space: nowrap !important; font-size: 1.15rem !important; }
+    .app-header p { display: none !important; }
+    .account-badge { display: none !important; }
+    .logout-action { min-width: 4.5rem !important; padding-inline: 0.5rem !important; }
+    .primary-navigation .wrap { gap: 0.2rem !important; }
+    .primary-navigation label { padding: 0.55rem 0.2rem !important; font-size: 0.78rem !important; }
     #library-layout {
         display: flex !important;
         flex-direction: column !important;
         flex-wrap: nowrap !important;
     }
     #library-layout > * { width: 100% !important; min-width: 0 !important; }
-    .question-row, .library-row, .filter-row, .knowledge-selector-row { flex-direction: column !important; }
-    .question-row > *, .library-row > *, .filter-row > *, .knowledge-selector-row > * {
+    .library-row, .filter-row { flex-direction: column !important; }
+    .library-row > *, .filter-row > * {
         width: 100% !important;
         min-width: 0 !important;
+    }
+    .knowledge-picker-card,
+    .filter-row {
+        padding: 0 !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        background: transparent !important;
+        box-shadow: none !important;
+    }
+    .upload-panel {
+        height: 8rem !important;
+        min-height: 8rem !important;
     }
     .compact-action { max-width: none !important; }
     .chat-history { height: 340px !important; }
@@ -186,9 +640,20 @@ html, body {
         margin-left: 0 !important;
     }
     .chat-send { flex-basis: 5.5rem !important; min-width: 5.5rem !important; }
+    .modal-overlay { align-items: flex-end !important; padding: 0 !important; }
+    .modal-card {
+        width: 100% !important;
+        max-height: 92vh !important;
+        border-radius: 18px 18px 0 0 !important;
+    }
+    .modal-header { align-items: center !important; }
+    .modal-header h2 { font-size: 1.15rem !important; }
+    .modal-header button { min-width: 6.5rem !important; }
+    .modal-body { overflow-x: auto !important; }
+    .modal-toolbar { flex-direction: column !important; }
+    .modal-toolbar > * { width: 100% !important; min-width: 0 !important; }
 }
 """
-
 
 def stage_chat_message(message: str, history) -> tuple[str, list[dict[str, str]], str]:
     """Render the submitted question immediately while preserving it for processing."""
@@ -248,8 +713,8 @@ class PDFLearningAssistant:
         self.max_file_bytes = max_file_bytes
         self.rag_tool_factory = rag_tool_factory
         self.knowledge_store = knowledge_store
-        self.knowledge_bases = dict(knowledge_bases or {"default": "默认知识库"})
-        self.knowledge_bases.setdefault("default", "默认知识库")
+        self.knowledge_bases = dict(knowledge_bases or {"default": "共享知识库"})
+        self.knowledge_bases["default"] = "共享知识库"
         self.rag_tools = {"default": rag_tool}
         self.current_knowledge_base_id = "default"
         self.session_start = datetime.now(timezone.utc)
@@ -258,6 +723,7 @@ class PDFLearningAssistant:
         self.notes_added = 0
         self.current_document: str | None = None
         self.current_document_id: str | None = None
+        self.conversations: list[dict[str, str]] = []
 
     def create_knowledge_base(self, name: str) -> dict[str, str]:
         normalized = self._bounded_text(name, "name", maximum=80)
@@ -283,6 +749,15 @@ class PDFLearningAssistant:
         return {"id": knowledge_base_id, "name": normalized}
 
     def list_knowledge_bases(self) -> list[dict[str, str]]:
+        if self.knowledge_store is not None:
+            accessible = self.knowledge_store.list_accessible_knowledge_bases(
+                user_id=self.user_id,
+                shared_owner_id=SHARED_KNOWLEDGE_OWNER,
+            )
+            self.knowledge_bases = {
+                item["id"]: item["name"]
+                for item in accessible
+            }
         return [
             {"id": knowledge_base_id, "name": name}
             for knowledge_base_id, name in self.knowledge_bases.items()
@@ -298,6 +773,9 @@ class PDFLearningAssistant:
         knowledge_base_id: str | None = None,
     ) -> tuple[str, str, RAGTool]:
         """Resolve one operation's knowledge-base boundary without shared selection state."""
+        # SQLite is the authorization and discovery source. Refreshing here prevents
+        # stale browser tabs from resolving a deleted or newly-created private scope.
+        self.list_knowledge_bases()
         normalized = self._required_text(
             knowledge_base_id or self.current_knowledge_base_id,
             "knowledge_base_id",
@@ -497,6 +975,7 @@ class PDFLearningAssistant:
                 "APIConnectionError",
                 "APITimeoutError",
                 "APIStatusError",
+                "BadRequestError",
                 "AuthenticationError",
                 "RateLimitError",
             }:
@@ -545,7 +1024,16 @@ class PDFLearningAssistant:
                 [],
                 knowledge_base_id=resolved_id,
             )
-            return "没有从当前知识库检索到足够相关的原文，暂时无法回答。"
+            unavailable = "没有从当前知识库检索到足够相关的原文，暂时无法回答。"
+            self.conversations.append(
+                {
+                    "knowledge_base_id": resolved_id,
+                    "question": normalized_question,
+                    "answer": unavailable,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            return unavailable
 
         context_blocks = []
         source_lines = []
@@ -592,7 +1080,16 @@ class PDFLearningAssistant:
             source_ids,
             knowledge_base_id=resolved_id,
         )
-        return f"{answer.strip()}\n\n来源：\n" + "\n".join(source_lines)
+        grounded_answer = f"{answer.strip()}\n\n来源：\n" + "\n".join(source_lines)
+        self.conversations.append(
+            {
+                "knowledge_base_id": resolved_id,
+                "question": normalized_question,
+                "answer": grounded_answer,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        return grounded_answer
 
     def add_note(
         self,
@@ -721,7 +1218,71 @@ class PDFLearningAssistant:
             "当前文档": self.current_document or "未加载",
         }
 
-    def generate_report(self, *, save_to_file: bool = True) -> dict[str, Any]:
+    def generate_report(
+        self,
+        *,
+        knowledge_base_id: str | None = None,
+        save_to_file: bool = True,
+    ) -> dict[str, Any]:
+        """Summarize real Q&A from this user's current session, grouped by library."""
+        conversations = list(self.conversations)
+        if knowledge_base_id is not None:
+            resolved_id, _, _ = self._knowledge_base_context(knowledge_base_id)
+            conversations = [
+                item
+                for item in conversations
+                if item["knowledge_base_id"] == resolved_id
+            ]
+        if not conversations:
+            raise ValueError("本次会话还没有可总结的真实问答。")
+
+        grouped: dict[str, list[dict[str, str]]] = {}
+        for item in conversations:
+            grouped.setdefault(item["knowledge_base_id"], []).append(item)
+
+        knowledge_base_summaries = []
+        summary_sections = []
+        note_count = 0
+        for resolved_id, items in grouped.items():
+            _, resolved_name, rag_tool = self._knowledge_base_context(resolved_id)
+            notes = self.list_notes(resolved_id)
+            note_count += len(notes)
+            transcript = "\n\n".join(
+                f"问题：{item['question']}\n回答：{item['answer'][:4_000]}"
+                for item in items[-30:]
+            )
+            summary = self.llm.invoke(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是会话总结助手。只能根据提供的真实问答生成中文总结，"
+                            "不得加入问答中不存在的事实，也不要把检索来源当成新的对话。"
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"来源知识库：{resolved_name}\n\n"
+                            f"本次会话真实问答：\n{transcript}\n\n"
+                            "请按“讨论主题、关键结论、未解决问题”简洁总结。"
+                        ),
+                    },
+                ],
+                temperature=0.2,
+            ).strip()
+            knowledge_base_summaries.append(
+                {
+                    "knowledge_base": {"id": resolved_id, "name": resolved_name},
+                    "questions_asked": len(items),
+                    "summary": summary,
+                    "conversations": items,
+                    "rag_status": rag_tool.stats(),
+                }
+            )
+            summary_sections.append(f"## 来源知识库：{resolved_name}\n\n{summary}")
+
+        learning_summary = "\n\n".join(summary_sections)
         duration = (datetime.now(timezone.utc) - self.session_start).total_seconds()
         report: dict[str, Any] = {
             "session_info": {
@@ -732,12 +1293,16 @@ class PDFLearningAssistant:
             },
             "learning_metrics": {
                 "documents_loaded": self.documents_loaded,
-                "questions_asked": self.questions_asked,
-                "notes_added": self.notes_added,
+                "questions_asked": len(conversations),
+                "notes_added": note_count,
+                "knowledge_bases_used": len(knowledge_base_summaries),
             },
-            "memory_summary": self.memory_tool.execute("summary"),
-            "rag_status": self.rag_tools[self.current_knowledge_base_id].stats(),
+            "learning_summary": learning_summary,
+            "conversations": conversations,
+            "knowledge_base_summaries": knowledge_base_summaries,
         }
+        if len(knowledge_base_summaries) == 1:
+            report["knowledge_base"] = knowledge_base_summaries[0]["knowledge_base"]
         if save_to_file:
             report_file = self.reports_path / f"learning_report_{self.session_id}.json"
             temporary = report_file.with_suffix(".json.tmp")
@@ -837,6 +1402,7 @@ def create_pdf_learning_assistant(
     session_id = f"session_{uuid4().hex}"
     database_path = project_path / "memory_data" / "practice_memory.db"
     knowledge_path = project_path / "knowledge_base" / user_scope
+    shared_knowledge_path = project_path / "knowledge_base" / "shared" / "default"
     reports_path = project_path / "learning_reports" / user_scope
 
     llm = create_llm_client_from_env()
@@ -876,12 +1442,12 @@ def create_pdf_learning_assistant(
     def build_rag_tool(knowledge_base_id: str) -> RAGTool:
         is_default = knowledge_base_id == "default"
         namespace = (
-            f"pdf_{user_scope}"
+            SHARED_KNOWLEDGE_NAMESPACE
             if is_default
             else f"kb_{user_scope}_{knowledge_base_id}"
         )
         base_path = (
-            knowledge_path
+            shared_knowledge_path
             if is_default
             else knowledge_path / "bases" / knowledge_base_id
         )
@@ -905,16 +1471,22 @@ def create_pdf_learning_assistant(
             pipeline=pipeline,
         )
 
-    default_namespace = f"pdf_{user_scope}"
     knowledge_store.ensure_knowledge_base(
-        user_id=normalized_user,
+        user_id=SHARED_KNOWLEDGE_OWNER,
         knowledge_base_id="default",
-        name="默认知识库",
-        namespace=default_namespace,
+        name="共享知识库",
+        namespace=SHARED_KNOWLEDGE_NAMESPACE,
+    )
+    knowledge_store.rename_knowledge_base_display_name(
+        old_name="默认知识库",
+        new_name="共享知识库",
     )
     knowledge_bases = {
         item["id"]: item["name"]
-        for item in knowledge_store.list_knowledge_bases(user_id=normalized_user)
+        for item in knowledge_store.list_accessible_knowledge_bases(
+            user_id=normalized_user,
+            shared_owner_id=SHARED_KNOWLEDGE_OWNER,
+        )
     }
     rag_tool = build_rag_tool("default")
     return PDFLearningAssistant(
@@ -1032,28 +1604,60 @@ def ensure_server_port_available(host: str, port: int) -> None:
         ) from error
 
 
+def document_table_height(row_count: int) -> int:
+    """Size the document viewport from authoritative backend row count."""
+    visible_rows = min(max(row_count, 1), 7)
+    return 52 + visible_rows * 44
+
+
 def create_gradio_app(
     factory: Callable[[str], PDFLearningAssistant] = create_pdf_learning_assistant,
+    user_store: UserAccountStore | None = None,
 ) -> gr.Blocks:
     """Create a responsive library, Q&A, and learning-progress interface."""
     sessions = AssistantSessions(factory)
+    accounts = user_store or UserAccountStore(
+        PROJECT_DIR / "memory_data" / "practice_memory.db"
+    )
+
+    def show_primary_view(destination: str):
+        normalized = normalize_primary_view(destination)
+        library_visible, chat_visible, stats_visible = primary_view_visibility(
+            normalized
+        )
+        return (
+            normalized,
+            gr.update(visible=library_visible),
+            gr.update(visible=chat_visible),
+            gr.update(visible=stats_visible),
+        )
 
     def knowledge_base_update(
         assistant: PDFLearningAssistant,
         value: str | None = None,
-    ) -> gr.Dropdown:
+    ) -> dict[str, Any]:
         choices = [(item["name"], item["id"]) for item in assistant.list_knowledge_bases()]
-        return gr.Dropdown(choices=choices, value=value or "default")
+        allowed_values = {item[1] for item in choices}
+        selected = value if value in allowed_values else "default"
+        return gr.update(
+            choices=choices,
+            value=selected,
+        )
 
     def management_knowledge_base_update(
         assistant: PDFLearningAssistant,
         value: str = ALL_KNOWLEDGE_BASES,
-    ) -> gr.Dropdown:
+    ) -> dict[str, Any]:
         choices = [("所有知识库", ALL_KNOWLEDGE_BASES)] + [
             (item["name"], item["id"])
             for item in assistant.list_knowledge_bases()
         ]
-        return gr.Dropdown(choices=choices, value=value)
+        allowed_values = {item[1] for item in choices}
+        selected = value if value in allowed_values else ALL_KNOWLEDGE_BASES
+        return gr.update(
+            choices=choices,
+            value=selected,
+        )
 
     def document_state(
         assistant: PDFLearningAssistant,
@@ -1090,6 +1694,12 @@ def create_gradio_app(
             for document in documents
         ]
 
+    def document_table_update(rows: list[list[str]]) -> dict[str, Any]:
+        return gr.update(
+            value=rows,
+            max_height=document_table_height(len(rows)),
+        )
+
     def manager_document_state(
         assistant: PDFLearningAssistant,
         knowledge_base_id: str,
@@ -1106,7 +1716,7 @@ def create_gradio_app(
     def document_type_update(
         assistant: PDFLearningAssistant,
         knowledge_base_id: str,
-    ) -> gr.Dropdown:
+    ) -> dict[str, Any]:
         choices = [("全部类型", "")] + [
             (item.upper(), item)
             for item in assistant.list_document_types(
@@ -1114,7 +1724,7 @@ def create_gradio_app(
                 include_all=knowledge_base_id == ALL_KNOWLEDGE_BASES,
             )
         ]
-        return gr.Dropdown(choices=choices, value="")
+        return gr.update(choices=choices, value="")
 
     def note_state(
         assistant: PDFLearningAssistant,
@@ -1140,35 +1750,190 @@ def create_gradio_app(
     def library_state(assistant: PDFLearningAssistant, knowledge_base_id: str):
         document_rows, document_ids = document_state(assistant, knowledge_base_id)
         return (
-            document_rows,
+            document_table_update(document_rows),
             document_ids,
             document_type_update(assistant, knowledge_base_id),
             note_state(assistant, knowledge_base_id),
         )
 
-    def initialize(previous_token: str):
-        try:
-            token, assistant = sessions.create("web_user", previous_token)
+    def render_authenticated_state(
+        account: dict[str, str],
+        token: str,
+        assistant: PDFLearningAssistant,
+        destination: str = "chat",
+    ):
+        normalized_destination = normalize_primary_view(destination)
+        library_visible, chat_visible, stats_visible = primary_view_visibility(
+            normalized_destination
+        )
+        return (
+            "",
+            "",
+            "",
+            gr.update(visible=False),
+            gr.update(visible=True),
+            token,
+            f"当前用户：**{account['username']}**",
+            "✅ 资源已就绪。基础检索默认开启，高级检索按需启用。",
+            management_knowledge_base_update(assistant),
+            knowledge_base_update(assistant),
+            knowledge_base_update(assistant),
+            *library_state(assistant, ALL_KNOWLEDGE_BASES),
+            gr.Radio(value=normalized_destination),
+            normalized_destination,
+            gr.update(visible=library_visible),
+            gr.update(visible=chat_visible),
+            gr.update(visible=stats_visible),
+        )
+
+    def authenticated_state(account: dict[str, str], previous_token: str):
+        token, assistant = sessions.create(account["user_id"], previous_token)
+        return render_authenticated_state(account, token, assistant, "chat")
+
+    def restore_session(token: str, destination: str):
+        """Restore the signed-in view after a browser refresh."""
+        assistant = sessions.get(token)
+        account = accounts.get_by_id(assistant.user_id) if assistant else None
+        if assistant is None or account is None:
             return (
-                "✅ 资源已就绪。基础检索默认开启，高级检索按需启用。",
-                token,
-                management_knowledge_base_update(assistant),
-                knowledge_base_update(assistant),
-                knowledge_base_update(assistant),
-                *library_state(assistant, ALL_KNOWLEDGE_BASES),
+                "",
+                "",
+                "",
+                gr.update(visible=True),
+                gr.update(visible=False),
+                "",
+                "",
+                "",
+                gr.Dropdown(),
+                gr.Dropdown(),
+                gr.Dropdown(),
+                [],
+                [],
+                gr.Dropdown(),
+                [],
+                gr.Radio(value="chat"),
+                "chat",
+                gr.update(visible=False),
+                gr.update(visible=True),
+                gr.update(visible=False),
+            )
+        return render_authenticated_state(account, token, assistant, destination)
+
+    def login_account(username: str, password: str, previous_token: str):
+        try:
+            account = accounts.authenticate(username, password)
+            if account is None:
+                raise ValueError("用户名或密码不正确。")
+            return authenticated_state(account, previous_token)
+        except Exception as error:
+            detail = str(error) if isinstance(error, ValueError) else format_initialization_error(error)
+            return (
+                f"❌ 登录失败：{detail}",
+                username,
+                "",
+                gr.update(visible=True),
+                gr.update(visible=False),
+                previous_token,
+                "",
+                "",
+                gr.Dropdown(),
+                gr.Dropdown(),
+                gr.Dropdown(),
+                [],
+                [],
+                gr.Dropdown(),
+                [],
+                gr.Radio(value="chat"),
+                "chat",
+                gr.update(visible=False),
+                gr.update(visible=True),
+                gr.update(visible=False),
+            )
+
+    def register_account(
+        username: str,
+        password: str,
+        confirmation: str,
+    ):
+        if password != confirmation:
+            return (
+                "❌ 注册失败：两次输入的密码不一致。",
+                username,
+                "",
+                "",
+                gr.Group(visible=False),
+                gr.Group(visible=True),
+                "",
+                "",
+            )
+        try:
+            account = accounts.register(username, password)
+            return (
+                "",
+                "",
+                "",
+                "",
+                gr.Group(visible=True),
+                gr.Group(visible=False),
+                account["username"],
+                "✅ 注册成功，请使用新账号登录。",
             )
         except Exception as error:
+            detail = str(error) if isinstance(error, ValueError) else format_initialization_error(error)
             return (
-                format_initialization_error(error),
-                previous_token,
-                gr.Dropdown(),
-                gr.Dropdown(),
-                gr.Dropdown(),
-                [],
-                [],
-                gr.Dropdown(),
-                [],
+                f"❌ 注册失败：{detail}",
+                username,
+                "",
+                "",
+                gr.Group(visible=False),
+                gr.Group(visible=True),
+                "",
+                "",
             )
+
+    def logout_account(token: str):
+        sessions.remove(token)
+        return (
+            gr.update(visible=True),
+            gr.update(visible=False),
+            gr.update(visible=True),
+            gr.update(visible=False),
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            gr.Radio(value="chat"),
+            "chat",
+            gr.update(visible=False),
+            gr.update(visible=True),
+            gr.update(visible=False),
+        )
+
+    def show_registration(username: str):
+        return (
+            gr.Group(visible=False),
+            gr.Group(visible=True),
+            username,
+            "",
+            "",
+            "",
+        )
+
+    def show_login(username: str):
+        return (
+            gr.Group(visible=True),
+            gr.Group(visible=False),
+            username,
+            "",
+            "",
+        )
 
     def create_knowledge_base(name: str, token: str):
         assistant = sessions.get(token)
@@ -1208,7 +1973,7 @@ def create_gradio_app(
     def select_management_knowledge_base(knowledge_base_id: str, token: str):
         assistant = sessions.get(token)
         if assistant is None:
-            return "❌ 助手尚未就绪。", [], [], gr.Dropdown(), []
+            return "❌ 助手尚未就绪。", document_table_update([]), [], gr.Dropdown(), []
         try:
             if knowledge_base_id == ALL_KNOWLEDGE_BASES:
                 name = "所有知识库"
@@ -1216,13 +1981,16 @@ def create_gradio_app(
                 _, name, _ = assistant._knowledge_base_context(knowledge_base_id)
             return f"正在管理「{name}」", *library_state(assistant, knowledge_base_id)
         except Exception as error:
-            return f"❌ 选择失败：{error}", [], [], gr.Dropdown(), []
+            return f"❌ 选择失败：{error}", document_table_update([]), [], gr.Dropdown(), []
 
     def filter_documents(query: str, source_type: str, token: str, knowledge_base_id: str):
         assistant = sessions.get(token)
         if assistant is None:
-            return [], []
-        return document_state(assistant, knowledge_base_id, query, source_type)
+            return document_table_update([]), []
+        rows, document_ids = document_state(
+            assistant, knowledge_base_id, query, source_type
+        )
+        return document_table_update(rows), document_ids
 
     def filter_notes(query: str, newest_first: bool, token: str, knowledge_base_id: str):
         assistant = sessions.get(token)
@@ -1274,19 +2042,20 @@ def create_gradio_app(
     def load_files(file_paths, token: str, knowledge_base_id: str):
         assistant = sessions.get(token)
         if assistant is None:
-            return "❌ 助手尚未就绪。", [], [], gr.Dropdown()
+            return "❌ 助手尚未就绪。", document_table_update([]), [], gr.Dropdown(), None
         if knowledge_base_id == ALL_KNOWLEDGE_BASES:
             rows, document_ids = document_state(assistant, knowledge_base_id)
             return (
                 "❌ 上传前请先在左侧选择一个具体知识库。",
-                rows,
+                document_table_update(rows),
                 document_ids,
                 document_type_update(assistant, knowledge_base_id),
+                None,
             )
         paths = [file_paths] if isinstance(file_paths, str) else list(file_paths or [])
         if not paths:
             rows, document_ids = document_state(assistant, knowledge_base_id)
-            return "❌ 请选择文件。", rows, document_ids, document_type_update(assistant, knowledge_base_id)
+            return "❌ 请选择文件。", document_table_update(rows), document_ids, document_type_update(assistant, knowledge_base_id), None
         status = "\n\n".join(
             format_document_load_result(
                 assistant.load_document(path, knowledge_base_id=knowledge_base_id)
@@ -1294,7 +2063,7 @@ def create_gradio_app(
             for path in paths
         )
         rows, document_ids = document_state(assistant, knowledge_base_id)
-        return status, rows, document_ids, document_type_update(assistant, knowledge_base_id)
+        return status, document_table_update(rows), document_ids, document_type_update(assistant, knowledge_base_id), None
 
     def request_document_deletion(
         document_ids: list[dict[str, str]],
@@ -1317,7 +2086,7 @@ def create_gradio_app(
     ):
         assistant = sessions.get(token)
         if assistant is None:
-            return "❌ 助手尚未就绪。", [], [], gr.Dropdown(), "", gr.Group(visible=False)
+            return "❌ 助手尚未就绪。", document_table_update([]), [], gr.Dropdown(), "", gr.Group(visible=False)
         try:
             removed = assistant.delete_document(
                 document_reference["document_id"],
@@ -1325,10 +2094,10 @@ def create_gradio_app(
                 confirmed=True,
             )
             rows, document_ids = document_state(assistant, knowledge_base_id)
-            return f"✅ 已删除：{removed['name']}", rows, document_ids, document_type_update(assistant, knowledge_base_id), "", gr.Group(visible=False)
+            return f"✅ 已删除：{removed['name']}", document_table_update(rows), document_ids, document_type_update(assistant, knowledge_base_id), "", gr.Group(visible=False)
         except Exception as error:
             rows, document_ids = document_state(assistant, knowledge_base_id)
-            return f"❌ 删除失败：{error}", rows, document_ids, document_type_update(assistant, knowledge_base_id), "", gr.Group(visible=False)
+            return f"❌ 删除失败：{error}", document_table_update(rows), document_ids, document_type_update(assistant, knowledge_base_id), "", gr.Group(visible=False)
 
     def answer_chat(message: str, history, token: str, knowledge_base_id: str, advanced: bool):
         if not message.strip():
@@ -1375,225 +2144,385 @@ def create_gradio_app(
         details = "\n".join(f"- **{key}**：{value}" for key, value in assistant.get_stats().items())
         return f"📊 **学习统计**\n\n{details}"
 
-    def create_report(token: str, knowledge_base_id: str) -> str:
+    def create_report(token: str) -> str:
         assistant = sessions.get(token)
         if assistant is None:
             return "❌ 助手尚未就绪。"
         try:
-            assistant.select_knowledge_base(knowledge_base_id)
             report = assistant.generate_report()
             metrics = report["learning_metrics"]
             return (
-                "✅ 学习报告已生成\n\n"
-                f"会话时长：{report['session_info']['duration_seconds']:.0f} 秒\n"
-                f"加载文档：{metrics['documents_loaded']}\n"
-                f"提问次数：{metrics['questions_asked']}\n"
-                f"学习笔记：{metrics['notes_added']}\n\n"
-                f"保存位置：{report.get('report_file', '未保存')}"
+                "### 本次会话问答总结\n\n"
+                f"{report['learning_summary']}\n\n"
+                f"---\n本次总结包含 {metrics['questions_asked']} 次真实问答，"
+                f"涉及 {metrics['knowledge_bases_used']} 个知识库。"
+                "报告已保存到当前用户目录。"
             )
+        except ValueError as error:
+            return f"❌ {error}"
         except Exception as error:
             return f"❌ 报告生成失败（{type(error).__name__}）。"
 
-    with gr.Blocks(title="智能文档问答助手") as demo:
-        session_token = gr.State(value="", time_to_live=3600, delete_callback=sessions.remove)
+    with gr.Blocks(title="浚民的智能知识库") as demo:
+        # BrowserState survives a normal page refresh; the server-side session remains
+        # authoritative and is removed explicitly when the user logs out.
+        session_token = gr.BrowserState(
+            default_value="",
+            storage_key="hello_agents_practice_session",
+        )
+        primary_destination = gr.BrowserState(
+            default_value="chat",
+            storage_key="hello_agents_practice_primary_view",
+        )
         document_ids = gr.State([])
         pending_document_id = gr.State("")
         note_newest_first = gr.State(True)
-        gr.Markdown("# 📚 智能文档问答助手\n按知识库管理资料、提问和记录笔记。", elem_classes=["app-header"])
-        startup_status = gr.Markdown("⏳ 正在初始化本地资源……")
 
-        with gr.Tab("🗂️ 知识库"):
-            with gr.Row(elem_id="library-layout", elem_classes=["library-row"]):
-                with gr.Column(scale=2, min_width=360):
-                    with gr.Group(elem_classes=["knowledge-picker-card"]):
-                        with gr.Row(elem_classes=["knowledge-card-header"]):
-                            gr.Markdown("**知识库**")
-                            manage_knowledge_bases_button = gr.Button(
-                                "管理知识库",
-                                size="sm",
-                                scale=0,
-                                elem_classes=["compact-action"],
-                            )
-                        management_knowledge_base = gr.Dropdown(
-                            label="选择知识库",
-                            show_label=False,
-                            choices=[("所有知识库", ALL_KNOWLEDGE_BASES)],
-                            value=ALL_KNOWLEDGE_BASES,
-                            interactive=True,
-                        )
-                    management_status = gr.Markdown("正在管理「所有知识库」")
-                with gr.Column(scale=4, min_width=0, elem_classes=["library-content"]):
-                    with gr.Tab("文档"):
-                        with gr.Row(elem_classes=["filter-row"]):
-                            document_search = gr.Textbox(label="搜索文档", placeholder="输入文件名")
-                            document_type_filter = gr.Dropdown(
-                                label="文件类型",
-                                choices=[("全部类型", "")],
-                                value="",
-                            )
-                        documents_table = gr.Dataframe(
-                            headers=["文件名", "类型", "所属知识库", "添加时间", "操作"],
-                            datatype=["str", "str", "str", "str", "str"],
-                            value=[],
-                            type="array",
-                            interactive=False,
-                            wrap=True,
-                            buttons=[],
-                            elem_classes=["document-table"],
-                        )
-                        source_files = gr.File(
-                            label="上传后自动解析并建立索引",
-                            file_types=sorted(SUPPORTED_FILE_SUFFIXES),
-                            type="filepath",
-                            file_count="multiple",
-                        )
-                        load_status = gr.Markdown("图片和扫描件使用简体中文 + 英文 OCR。")
-                        delete_status = gr.Markdown()
-                    with gr.Tab("笔记"):
-                        with gr.Row(elem_classes=["note-toolbar"]):
-                            note_search = gr.Textbox(
-                                label="搜索笔记",
-                                placeholder="输入笔记内容",
-                                scale=8,
-                            )
-                            note_sort_button = gr.Button(
-                                "↕",
-                                size="sm",
-                                scale=0,
-                                min_width=48,
-                                elem_id="note-sort-button",
-                            )
-                        notes_table = gr.Dataframe(
-                            headers=["笔记", "所属知识库", "创建时间"],
-                            datatype=["str", "str", "str"],
-                            value=[],
-                            type="array",
-                            interactive=False,
-                            wrap=True,
-                            buttons=[],
-                        )
-
-        with gr.Tab("💬 智能问答"):
-            with gr.Column(elem_classes=["chat-shell"]):
-                chatbot = gr.Chatbot(
-                    label="对话历史",
-                    height=440,
-                    layout="bubble",
-                    elem_classes=["chat-history"],
+        with gr.Group(elem_classes=["auth-shell"]) as auth_shell:
+            gr.Markdown(
+                "# 📚 欢迎来到浚民的智能知识库\n登录后管理你的资料、对话和学习报告。",
+                elem_classes=["auth-heading"],
+            )
+            with gr.Group(elem_classes=["auth-panel"]) as login_panel:
+                auth_status = gr.Markdown(elem_classes=["auth-status"])
+                account_username = gr.Textbox(label="用户名")
+                account_password = gr.Textbox(label="密码", type="password")
+                with gr.Row(elem_classes=["auth-mode-row"]):
+                    gr.Markdown("没有账号？", elem_classes=["auth-mode-copy"])
+                    show_register_button = gr.Button(
+                        "注册",
+                        size="sm",
+                        elem_classes=["auth-mode-action"],
+                    )
+                login_button = gr.Button(
+                    "登录",
+                    variant="primary",
+                    elem_classes=["auth-primary"],
                 )
-                pending_question = gr.State("")
-                with gr.Row(elem_classes=["chat-controls"]):
-                    qa_knowledge_base = gr.Dropdown(
-                        label="选择知识库",
-                        choices=[("默认知识库", "default")],
-                        value="default",
-                        interactive=True,
-                        show_label=False,
-                        container=False,
-                        min_width=176,
-                        elem_classes=["chat-knowledge-base"],
+            with gr.Group(
+                visible=False,
+                elem_classes=["auth-panel"],
+            ) as registration_panel:
+                registration_status = gr.Markdown(elem_classes=["auth-status"])
+                registration_username = gr.Textbox(label="用户名")
+                registration_password = gr.Textbox(
+                    label="密码",
+                    type="password",
+                    info="至少 6 位",
+                )
+                registration_confirmation = gr.Textbox(
+                    label="确认密码",
+                    type="password",
+                )
+                register_button = gr.Button(
+                    "创建账号",
+                    variant="primary",
+                    elem_classes=["auth-primary"],
+                )
+                show_login_button = gr.Button(
+                    "返回登录",
+                    size="sm",
+                    elem_classes=["auth-back"],
+                )
+
+        with gr.Group(visible=False) as app_shell:
+            with gr.Row(elem_classes=["app-topbar"]):
+                gr.Markdown(
+                    "# 📚 浚民的智能知识库\n按知识库管理资料、提问和记录笔记。",
+                    elem_classes=["app-header"],
+                )
+                with gr.Column(scale=0, min_width=120):
+                    current_username = gr.Markdown(elem_classes=["account-badge"])
+                    logout_button = gr.Button("退出登录", size="sm", elem_classes=["logout-action"])
+            startup_status = gr.Markdown()
+            primary_navigation = gr.Radio(
+                choices=[
+                    ("💬 智能问答", "chat"),
+                    ("🗂️ 知识库", "library"),
+                    ("📊 学习统计", "stats"),
+                ],
+                value="chat",
+                show_label=False,
+                container=False,
+                elem_classes=["primary-navigation"],
+            )
+
+            with gr.Group(visible=False) as library_view:
+                with gr.Row(elem_id="library-layout", elem_classes=["library-row"]):
+                    with gr.Column(scale=2, min_width=300):
+                        with gr.Group(elem_classes=["knowledge-picker-card"]):
+                            with gr.Row(elem_classes=["knowledge-card-header"]):
+                                gr.Markdown("**知识库**")
+                                manage_knowledge_bases_button = gr.Button(
+                                    "管理知识库",
+                                    size="sm",
+                                    scale=0,
+                                    elem_classes=["compact-action"],
+                                )
+                            management_knowledge_base = gr.Dropdown(
+                                label="选择知识库",
+                                show_label=False,
+                                choices=[("所有知识库", ALL_KNOWLEDGE_BASES)],
+                                value=ALL_KNOWLEDGE_BASES,
+                                interactive=True,
+                                filterable=True,
+                                allow_custom_value=True,
+                            )
+                        management_status = gr.Markdown("正在管理「所有知识库」")
+                    with gr.Column(scale=5, min_width=0, elem_classes=["library-content"]):
+                        with gr.Tab("文档"):
+                            with gr.Row(elem_classes=["filter-row"]):
+                                document_search = gr.Textbox(label="搜索文档", placeholder="输入文件名")
+                                document_type_filter = gr.Dropdown(
+                                    label="文件类型",
+                                    choices=[("全部类型", "")],
+                                    value="",
+                                    filterable=True,
+                                    allow_custom_value=True,
+                                )
+                            documents_table = gr.Dataframe(
+                                headers=["文件名", "类型", "所属知识库", "添加时间", "操作"],
+                                datatype=["str", "str", "str", "str", "str"],
+                                value=[], type="array", interactive=False, wrap=False,
+                                line_breaks=False, max_height=document_table_height(0),
+                                row_count=0, buttons=[], elem_classes=["document-table"],
+                            )
+                            source_files = gr.File(
+                                label="上传后自动解析并建立索引",
+                                file_types=sorted(SUPPORTED_FILE_SUFFIXES),
+                                type="filepath", file_count="multiple",
+                                elem_classes=["upload-panel"],
+                            )
+                            load_status = gr.Markdown("图片和扫描件使用简体中文 + 英文 OCR。")
+                            delete_status = gr.Markdown()
+                        with gr.Tab("笔记"):
+                            with gr.Row(elem_classes=["note-toolbar"]):
+                                note_search = gr.Textbox(label="搜索笔记", placeholder="输入笔记内容", scale=8)
+                                note_sort_button = gr.Button("↕", size="sm", scale=0, min_width=48, elem_id="note-sort-button")
+                            notes_table = gr.Dataframe(
+                                headers=["笔记", "所属知识库", "创建时间"],
+                                datatype=["str", "str", "str"], value=[], type="array",
+                                interactive=False, wrap=True, buttons=[],
+                            )
+
+            with gr.Group() as chat_view:
+                with gr.Column(elem_classes=["chat-shell"]):
+                    chatbot = gr.Chatbot(
+                        label="对话历史", height=440, layout="bubble",
+                        placeholder="今天有什么想询问知识库的吗？",
+                        elem_classes=["chat-history"],
                     )
-                    advanced_search = gr.Checkbox(
-                        label="高级检索",
-                        value=False,
-                        container=False,
-                        min_width=0,
-                        elem_classes=["advanced-toggle"],
-                    )
-                with gr.Group(elem_classes=["chat-composer"]):
-                    with gr.Row(elem_classes=["chat-input-row"]):
-                        question = gr.Textbox(
-                            label="输入问题",
-                            show_label=False,
-                            placeholder="基于当前知识库提问",
-                            lines=1,
-                            max_lines=5,
-                            scale=1,
+                    pending_question = gr.State("")
+                    with gr.Row(elem_classes=["chat-controls"]):
+                        qa_knowledge_base = gr.Dropdown(
+                            label="选择知识库", choices=[("共享知识库", "default")],
+                            value="default", interactive=True, show_label=False,
+                            container=False, min_width=176, filterable=True,
+                            allow_custom_value=True,
+                            elem_classes=["chat-knowledge-base"],
                         )
-                        send_button = gr.Button(
-                            "发送",
-                            variant="primary",
+                        advanced_search = gr.Checkbox(
+                            label="高级检索", value=False, container=False,
+                            min_width=0, elem_classes=["advanced-toggle"],
+                        )
+                    with gr.Group(elem_classes=["chat-composer"]):
+                        with gr.Row(elem_classes=["chat-input-row"]):
+                            question = gr.Textbox(
+                                label="输入问题", show_label=False,
+                                placeholder="基于当前知识库提问",
+                                lines=1, max_lines=5, scale=1,
+                                elem_classes=["chat-question"],
+                            )
+                            send_button = gr.Button(
+                                "发送", variant="primary", size="sm", scale=0,
+                                elem_classes=["chat-send"],
+                            )
+                with gr.Accordion("📝 记录本次对话笔记", open=False):
+                    note_binding_status = gr.Markdown("笔记将自动保存到「共享知识库」。")
+                    note = gr.Textbox(label="笔记内容", lines=3)
+                    note_button = gr.Button("保存笔记", variant="primary")
+                    note_status = gr.Textbox(label="保存状态", interactive=False)
+
+            with gr.Group(visible=False) as stats_view:
+                with gr.Row(elem_classes=["stats-actions"]):
+                    stats_button = gr.Button("刷新统计", variant="secondary")
+                    report_button = gr.Button("总结本次会话真实问答", variant="primary")
+                stats_output = gr.Markdown()
+                report_output = gr.Markdown(elem_classes=["report-output"])
+
+            with gr.Group(visible=False, elem_classes=["modal-overlay"]) as knowledge_base_manager:
+                with gr.Group(elem_classes=["modal-card"]):
+                    with gr.Row(elem_classes=["modal-header"]):
+                        gr.Markdown("## 管理知识库\n查看每个知识库中已建立索引的文档。")
+                        open_create_knowledge_base = gr.Button("新建知识库", variant="primary", size="sm", scale=0)
+                    with gr.Column(elem_classes=["modal-body"]):
+                        with gr.Row(elem_classes=["modal-toolbar"]):
+                            manager_knowledge_base = gr.Dropdown(
+                                label="选择知识库",
+                                choices=[("共享知识库", "default")],
+                                value="default", interactive=True, filterable=True,
+                                allow_custom_value=True,
+                                show_label=False, container=False,
+                                elem_classes=["manager-selector"],
+                            )
+                            manager_status = gr.Markdown()
+                        manager_documents = gr.Dataframe(
+                            headers=["文档", "类型", "添加时间"],
+                            datatype=["str", "str", "str"], value=[], type="array",
+                            interactive=False, wrap=True, buttons=[],
+                        )
+                    with gr.Row(elem_classes=["modal-footer"]):
+                        close_knowledge_base_manager = gr.Button(
+                            "关闭",
+                            variant="stop",
                             size="sm",
                             scale=0,
-                            elem_classes=["chat-send"],
+                            elem_classes=["manager-close"],
                         )
-            with gr.Accordion("📝 记录本次对话笔记", open=False):
-                note_binding_status = gr.Markdown("笔记将自动保存到「默认知识库」。")
-                note = gr.Textbox(label="笔记内容", lines=3)
-                note_button = gr.Button("保存笔记", variant="primary")
-                note_status = gr.Textbox(label="保存状态", interactive=False)
 
-        with gr.Tab("📊 学习统计"):
-            stats_button = gr.Button("刷新统计", variant="primary")
-            stats_output = gr.Markdown()
-            report_button = gr.Button("生成报告", variant="secondary")
-            report_output = gr.Textbox(label="报告状态", interactive=False, lines=8)
+            with gr.Group(visible=False, elem_classes=["modal-overlay"]) as create_knowledge_base_dialog:
+                with gr.Group(elem_classes=["modal-card", "confirm-card"]):
+                    gr.Markdown("## 新建知识库")
+                    new_knowledge_base = gr.Textbox(label="知识库名称", placeholder="例如：法律法规")
+                    with gr.Row():
+                        cancel_create_knowledge_base = gr.Button("取消")
+                        create_knowledge_base_button = gr.Button("创建", variant="primary")
 
-        with gr.Group(visible=False, elem_classes=["modal-overlay"]) as knowledge_base_manager:
-            with gr.Group(elem_classes=["modal-card"]):
-                with gr.Row():
-                    gr.Markdown("## 管理知识库\n选择知识库并查看其中的全部文档。")
-                    open_create_knowledge_base = gr.Button(
-                        "新建知识库",
-                        variant="primary",
-                        size="sm",
-                        scale=0,
-                    )
-                manager_status = gr.Markdown()
-                manager_knowledge_base = gr.Dropdown(
-                    label="知识库",
-                    choices=[("默认知识库", "default")],
-                    value="default",
-                    interactive=True,
-                )
-                manager_documents = gr.Dataframe(
-                    headers=["文档", "类型", "添加时间"],
-                    datatype=["str", "str", "str"],
-                    value=[],
-                    type="array",
-                    interactive=False,
-                    wrap=True,
-                    buttons=[],
-                )
-                with gr.Row(elem_classes=["modal-actions"]):
-                    close_knowledge_base_manager = gr.Button("关闭", size="sm", scale=0)
+            with gr.Group(visible=False, elem_classes=["modal-overlay"]) as delete_document_dialog:
+                with gr.Group(elem_classes=["modal-card", "confirm-card"]):
+                    delete_confirmation_text = gr.Markdown("确认删除这个文档？")
+                    gr.Markdown("删除后，该文档的原文件、检索索引和记录都会移除。")
+                    with gr.Row():
+                        cancel_delete_button = gr.Button("取消")
+                        confirm_delete_button = gr.Button("确认删除", variant="stop")
 
-        with gr.Group(visible=False, elem_classes=["modal-overlay"]) as create_knowledge_base_dialog:
-            with gr.Group(elem_classes=["modal-card", "confirm-card"]):
-                gr.Markdown("## 新建知识库")
-                new_knowledge_base = gr.Textbox(
-                    label="知识库名称",
-                    placeholder="例如：法律法规",
-                )
-                with gr.Row():
-                    cancel_create_knowledge_base = gr.Button("取消")
-                    create_knowledge_base_button = gr.Button(
-                        "创建",
-                        variant="primary",
-                    )
+        authentication_outputs = [
+            auth_status,
+            account_username,
+            account_password,
+            auth_shell,
+            app_shell,
+            session_token,
+            current_username,
+            startup_status,
+            management_knowledge_base,
+            qa_knowledge_base,
+            manager_knowledge_base,
+            documents_table,
+            document_ids,
+            document_type_filter,
+            notes_table,
+            primary_navigation,
+            primary_destination,
+            library_view,
+            chat_view,
+            stats_view,
+        ]
+        demo.load(
+            restore_session,
+            inputs=[session_token, primary_destination],
+            outputs=authentication_outputs,
+            queue=False,
+        )
+        show_register_button.click(
+            show_registration,
+            inputs=account_username,
+            outputs=[
+                login_panel,
+                registration_panel,
+                registration_username,
+                registration_password,
+                registration_confirmation,
+                registration_status,
+            ],
+        )
+        show_login_button.click(
+            show_login,
+            inputs=registration_username,
+            outputs=[
+                login_panel,
+                registration_panel,
+                account_username,
+                account_password,
+                auth_status,
+            ],
+        )
+        for login_event in (login_button.click, account_password.submit):
+            login_event(
+                login_account,
+                inputs=[account_username, account_password, session_token],
+                outputs=authentication_outputs,
+            )
+        register_button.click(
+            register_account,
+            inputs=[
+                registration_username,
+                registration_password,
+                registration_confirmation,
+            ],
+            outputs=[
+                registration_status,
+                registration_username,
+                registration_password,
+                registration_confirmation,
+                login_panel,
+                registration_panel,
+                account_username,
+                auth_status,
+            ],
+        )
+        logout_button.click(
+            logout_account,
+            inputs=session_token,
+            outputs=[
+                auth_shell,
+                app_shell,
+                login_panel,
+                registration_panel,
+                session_token,
+                current_username,
+                startup_status,
+                chatbot,
+                account_username,
+                account_password,
+                auth_status,
+                registration_username,
+                registration_password,
+                registration_confirmation,
+                registration_status,
+                primary_navigation,
+                primary_destination,
+                library_view,
+                chat_view,
+                stats_view,
+            ],
+        )
+        primary_navigation.change(
+            show_primary_view,
+            inputs=primary_navigation,
+            outputs=[primary_destination, library_view, chat_view, stats_view],
+            trigger_mode="always_last",
+        )
 
-        with gr.Group(visible=False, elem_classes=["modal-overlay"]) as delete_document_dialog:
-            with gr.Group(elem_classes=["modal-card", "confirm-card"]):
-                delete_confirmation_text = gr.Markdown("确认删除这个文档？")
-                gr.Markdown("删除后，该文档的原文件、检索索引和记录都会移除。")
-                with gr.Row():
-                    cancel_delete_button = gr.Button("取消")
-                    confirm_delete_button = gr.Button("确认删除", variant="stop")
-
-        management_knowledge_base.change(
+        # Only user input reloads business data. These dropdowns are also
+        # updated by callbacks; using `.change` would turn those updates into
+        # a second, stale table refresh that can overwrite the selected scope.
+        management_knowledge_base.input(
             select_management_knowledge_base,
             inputs=[management_knowledge_base, session_token],
             outputs=[management_status, documents_table, document_ids, document_type_filter, notes_table],
+            trigger_mode="always_last",
         )
         manage_knowledge_bases_button.click(
             open_knowledge_base_manager,
             inputs=[session_token, management_knowledge_base],
             outputs=[manager_knowledge_base, manager_documents, knowledge_base_manager],
         )
-        manager_knowledge_base.change(
+        manager_knowledge_base.input(
             select_manager_knowledge_base,
             inputs=[manager_knowledge_base, session_token],
             outputs=manager_documents,
+            trigger_mode="always_last",
         )
         close_knowledge_base_manager.click(
             close_overlay,
@@ -1615,18 +2544,25 @@ def create_gradio_app(
         source_files.upload(
             load_files,
             inputs=[source_files, session_token, management_knowledge_base],
-            outputs=[load_status, documents_table, document_ids, document_type_filter],
+            outputs=[load_status, documents_table, document_ids, document_type_filter, source_files],
         )
-        for component in (document_search, document_type_filter):
-            component.change(
-                filter_documents,
-                inputs=[document_search, document_type_filter, session_token, management_knowledge_base],
-                outputs=[documents_table, document_ids],
-            )
-        note_search.change(
+        document_search.input(
+            filter_documents,
+            inputs=[document_search, document_type_filter, session_token, management_knowledge_base],
+            outputs=[documents_table, document_ids],
+            trigger_mode="always_last",
+        )
+        document_type_filter.input(
+            filter_documents,
+            inputs=[document_search, document_type_filter, session_token, management_knowledge_base],
+            outputs=[documents_table, document_ids],
+            trigger_mode="always_last",
+        )
+        note_search.input(
             filter_notes,
             inputs=[note_search, note_newest_first, session_token, management_knowledge_base],
             outputs=notes_table,
+            trigger_mode="always_last",
         )
         note_sort_button.click(
             toggle_note_sort,
@@ -1647,10 +2583,11 @@ def create_gradio_app(
             inputs=[pending_document_id, session_token, management_knowledge_base],
             outputs=[delete_status, documents_table, document_ids, document_type_filter, pending_document_id, delete_document_dialog],
         )
-        qa_knowledge_base.change(
+        qa_knowledge_base.input(
             select_qa_knowledge_base,
             inputs=[qa_knowledge_base, session_token],
             outputs=[chatbot, note_binding_status],
+            trigger_mode="always_last",
         )
         for event in (question.submit, send_button.click):
             event(
@@ -1669,12 +2606,7 @@ def create_gradio_app(
             outputs=note_status,
         )
         stats_button.click(show_stats, inputs=[session_token, qa_knowledge_base], outputs=stats_output)
-        report_button.click(create_report, inputs=[session_token, qa_knowledge_base], outputs=report_output)
-        demo.load(
-            initialize,
-            inputs=session_token,
-            outputs=[startup_status, session_token, management_knowledge_base, qa_knowledge_base, manager_knowledge_base, documents_table, document_ids, document_type_filter, notes_table],
-        )
+        report_button.click(create_report, inputs=session_token, outputs=report_output)
     return demo
 
 
@@ -1700,6 +2632,8 @@ def main() -> None:
             show_error=False,
             theme=gr.themes.Soft(),
             css=APP_CSS,
+            js=APP_JS,
+            head=APP_HEAD,
         )
     finally:
         if infrastructure_started:

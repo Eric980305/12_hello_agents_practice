@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
-from hello_agents_practice import CalculatorTool, FunctionCallAgent, Tool, ToolRegistry
+from hello_agents_framework import CalculatorTool, FunctionCallAgent, Tool, ToolRegistry
 
 
 def make_tool_call(

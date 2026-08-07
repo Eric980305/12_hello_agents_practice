@@ -1,11 +1,11 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from hello_agents_practice.core.llm import HelloAgentsLLM
+from hello_agents_framework.core.llm import HelloAgentsLLM
 
 
 class HelloAgentsLLMTest(unittest.TestCase):
-    @patch("hello_agents_practice.core.llm.OpenAI")
+    @patch("hello_agents_framework.core.llm.OpenAI")
     def test_invoke_returns_complete_response(self, openai_mock: Mock) -> None:
         sdk = openai_mock.return_value
         sdk.chat.completions.create.return_value = Mock(
@@ -24,7 +24,7 @@ class HelloAgentsLLMTest(unittest.TestCase):
             temperature=0.2,
         )
 
-    @patch("hello_agents_practice.core.llm.OpenAI")
+    @patch("hello_agents_framework.core.llm.OpenAI")
     def test_stream_invoke_yields_nonempty_chunks(self, openai_mock: Mock) -> None:
         sdk = openai_mock.return_value
         sdk.chat.completions.create.return_value = [

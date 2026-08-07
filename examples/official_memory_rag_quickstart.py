@@ -1,6 +1,6 @@
 """Verify the official HelloAgents 0.2.0 memory and RAG configuration.
 
-Run from ``projects/12_hello_agents_framework`` after starting the local
+Run from ``projects/12_hello_agents_practice`` after starting the local
 Qdrant and Neo4j services. The default check initializes both tools, writes
 and retrieves one memory, and indexes and retrieves one RAG text without
 calling the LLM. Pass ``--rerank`` to verify the configured Bailian reranker

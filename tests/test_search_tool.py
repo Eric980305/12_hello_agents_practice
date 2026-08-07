@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from hello_agents_practice.tools import SearchTool
+from hello_agents_framework.tools import SearchTool
 
 
 class SearchToolTest(unittest.TestCase):
@@ -19,10 +19,10 @@ class SearchToolTest(unittest.TestCase):
         }
 
         with patch(
-            "hello_agents_practice.tools.builtin.search.TavilyClient",
+            "hello_agents_framework.tools.builtin.search.TavilyClient",
             return_value=tavily_client,
         ), patch(
-            "hello_agents_practice.tools.builtin.search.GoogleSearch",
+            "hello_agents_framework.tools.builtin.search.GoogleSearch",
         ) as serpapi_search:
             tool = SearchTool(
                 backend="hybrid",
@@ -52,10 +52,10 @@ class SearchToolTest(unittest.TestCase):
         }
 
         with patch(
-            "hello_agents_practice.tools.builtin.search.TavilyClient",
+            "hello_agents_framework.tools.builtin.search.TavilyClient",
             return_value=tavily_client,
         ), patch(
-            "hello_agents_practice.tools.builtin.search.GoogleSearch",
+            "hello_agents_framework.tools.builtin.search.GoogleSearch",
             return_value=serpapi_response,
         ) as serpapi_search:
             tool = SearchTool(
@@ -74,10 +74,10 @@ class SearchToolTest(unittest.TestCase):
         tavily_client.search.side_effect = RuntimeError("provider unavailable")
 
         with patch(
-            "hello_agents_practice.tools.builtin.search.TavilyClient",
+            "hello_agents_framework.tools.builtin.search.TavilyClient",
             return_value=tavily_client,
         ), patch(
-            "hello_agents_practice.tools.builtin.search.GoogleSearch",
+            "hello_agents_framework.tools.builtin.search.GoogleSearch",
         ) as serpapi_search:
             tool = SearchTool(
                 backend="tavily",

@@ -1,6 +1,6 @@
 """Experience the official HelloAgents 0.2.0 memory tool.
 
-Run from ``projects/12_hello_agents_framework`` after starting the local
+Run from ``projects/12_hello_agents_practice`` after starting the local
 Qdrant and Neo4j services. The example calls MemoryTool directly, so it uses
 the embedding and storage services but does not send a chat request to the LLM.
 """

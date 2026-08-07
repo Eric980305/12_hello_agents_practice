@@ -3,7 +3,7 @@ import threading
 import time
 import unittest
 
-from hello_agents_practice import AsyncToolExecutor, CalculatorTool, Tool, ToolRegistry
+from hello_agents_framework import AsyncToolExecutor, CalculatorTool, Tool, ToolRegistry
 
 
 class CountingTool(Tool):

@@ -3,7 +3,7 @@ import argparse
 from dotenv import load_dotenv
 
 from examples.local_simple_agent import ROOT_DIR, create_llm
-from hello_agents_practice import Config, ReflectionAgent
+from hello_agents_framework import Config, ReflectionAgent
 
 
 CODE_PROMPTS = {

@@ -1,6 +1,6 @@
 import asyncio
 
-from hello_agents_practice import (
+from hello_agents_framework import (
     AsyncToolExecutor,
     CalculatorTool,
     ToolChain,

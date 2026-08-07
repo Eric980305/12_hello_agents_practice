@@ -6,12 +6,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from hello_agents_practice import (
+from hello_agents_framework import (
     LLMQueryExpander,
     RAGTool,
     ToolRegistry,
 )
-from hello_agents_practice.core.llm import create_llm_client_from_env
+from hello_agents_framework.core.llm import create_llm_client_from_env
 
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]

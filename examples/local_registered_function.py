@@ -1,4 +1,4 @@
-from hello_agents_practice import CalculatorTool, ToolRegistry
+from hello_agents_framework import CalculatorTool, ToolRegistry
 
 
 def my_calculate(expression: str) -> str:

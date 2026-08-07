@@ -1,10 +1,10 @@
 import unittest
 from typing import Any, cast
 
-from hello_agents_practice.core.agent import Agent
-from hello_agents_practice.core.config import Config
-from hello_agents_practice.core.llm import HelloAgentsLLM
-from hello_agents_practice.core.message import Message
+from hello_agents_framework.core.agent import Agent
+from hello_agents_framework.core.config import Config
+from hello_agents_framework.core.llm import HelloAgentsLLM
+from hello_agents_framework.core.message import Message
 
 
 class FakeLLM:

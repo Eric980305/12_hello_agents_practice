@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from qdrant_client import QdrantClient
 
-from hello_agents_practice import (
+from hello_agents_framework import (
     EpisodicMemory,
     MemoryManager,
     MemoryTool,
@@ -17,7 +17,7 @@ from hello_agents_practice import (
     SQLiteDocumentStore,
     WorkingMemory,
 )
-from hello_agents_practice.memory import MemoryConfig, VectorSearchHit
+from hello_agents_framework.memory import MemoryConfig, VectorSearchHit
 
 
 class FakeEmbedder:
@@ -273,7 +273,7 @@ class OpenAICompatibleEmbeddingTest(unittest.TestCase):
         self.assertEqual(fake_embeddings.kwargs["model"], "text-embedding-v4")
         self.assertEqual(fake_embeddings.kwargs["dimensions"], 3)
 
-    def test_batches_at_most_25_texts_per_embedding_request(self) -> None:
+    def test_batches_at_most_10_texts_per_embedding_request(self) -> None:
         embedder = OpenAICompatibleEmbedding(
             model="text-embedding-v4",
             api_key="test-key",
@@ -303,8 +303,19 @@ class OpenAICompatibleEmbeddingTest(unittest.TestCase):
 
         vectors = embedder.embed_many([f"text-{index}" for index in range(51)])
 
-        self.assertEqual(fake_embeddings.batch_sizes, [25, 25, 1])
+        self.assertEqual(fake_embeddings.batch_sizes, [10, 10, 10, 10, 10, 1])
         self.assertEqual(len(vectors), 51)
+
+    def test_rejects_batch_sizes_above_provider_limit(self) -> None:
+        embedder = OpenAICompatibleEmbedding(
+            model="text-embedding-v4",
+            api_key="test-key",
+            base_url="https://example.invalid/compatible-api/v1",
+            dimension=3,
+        )
+
+        with self.assertRaisesRegex(ValueError, "between 1 and 10"):
+            embedder.embed_many(["text"], batch_size=11)
 
 
 if __name__ == "__main__":

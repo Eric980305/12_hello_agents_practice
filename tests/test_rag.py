@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 from qdrant_client import QdrantClient
 
-from hello_agents_practice import (
+from hello_agents_framework import (
     LLMQueryExpander,
     QdrantVectorStore,
     RAGPipeline,
@@ -16,7 +16,7 @@ from hello_agents_practice import (
     SQLiteKnowledgeStore,
     ToolRegistry,
 )
-from hello_agents_practice.memory.rag import Document, DocumentProcessor
+from hello_agents_framework.memory.rag import Document, DocumentProcessor
 
 
 class FakeEmbedder:
@@ -139,6 +139,105 @@ class RAGPipelineTest(unittest.TestCase):
         }])
         self.assertEqual(bob, [])
 
+    def test_lists_shared_default_and_only_the_current_users_private_bases(self) -> None:
+        self.documents.ensure_knowledge_base(
+            user_id="__shared__",
+            knowledge_base_id="default",
+            name="共享知识库",
+            namespace="pdf_shared_default",
+        )
+        self.documents.ensure_knowledge_base(
+            user_id="alice",
+            knowledge_base_id="legal",
+            name="法律资料",
+            namespace="kb_alice_legal",
+        )
+        self.documents.ensure_knowledge_base(
+            user_id="bob",
+            knowledge_base_id="finance",
+            name="财务资料",
+            namespace="kb_bob_finance",
+        )
+
+        alice = self.documents.list_accessible_knowledge_bases(
+            user_id="alice",
+            shared_owner_id="__shared__",
+        )
+        bob = self.documents.list_accessible_knowledge_bases(
+            user_id="bob",
+            shared_owner_id="__shared__",
+        )
+
+        self.assertEqual([item["id"] for item in alice], ["default", "legal"])
+        self.assertEqual([item["id"] for item in bob], ["default", "finance"])
+        self.assertEqual(alice[0]["name"], "共享知识库")
+
+    def test_shared_default_supersedes_a_legacy_personal_default_id(self) -> None:
+        self.documents.ensure_knowledge_base(
+            user_id="__shared__",
+            knowledge_base_id="default",
+            name="共享知识库",
+            namespace="pdf_shared_default",
+        )
+        self.documents.ensure_knowledge_base(
+            user_id="alice",
+            knowledge_base_id="default",
+            name="默认知识库",
+            namespace="pdf_legacy_alice",
+        )
+        self.documents.ensure_knowledge_base(
+            user_id="alice",
+            knowledge_base_id="legal",
+            name="法律资料",
+            namespace="kb_alice_legal",
+        )
+
+        accessible = self.documents.list_accessible_knowledge_bases(
+            user_id="alice",
+            shared_owner_id="__shared__",
+        )
+
+        self.assertEqual([item["id"] for item in accessible], ["default", "legal"])
+        self.assertEqual(accessible[0]["name"], "共享知识库")
+        self.assertEqual(accessible[0]["namespace"], "pdf_shared_default")
+
+    def test_renames_all_legacy_default_display_names(self) -> None:
+        self.documents.ensure_knowledge_base(
+            user_id="alice",
+            knowledge_base_id="default",
+            name="默认知识库",
+            namespace="pdf_legacy_alice",
+        )
+
+        changed = self.documents.rename_knowledge_base_display_name(
+            old_name="默认知识库",
+            new_name="共享知识库",
+        )
+
+        self.assertEqual(changed, 1)
+        self.assertEqual(
+            self.documents.list_knowledge_bases(user_id="alice")[0]["name"],
+            "共享知识库",
+        )
+
+    def test_knowledge_base_upsert_updates_the_display_name(self) -> None:
+        self.documents.ensure_knowledge_base(
+            user_id="__shared__",
+            knowledge_base_id="default",
+            name="默认知识库",
+            namespace="pdf_shared_default",
+        )
+        self.documents.ensure_knowledge_base(
+            user_id="__shared__",
+            knowledge_base_id="default",
+            name="共享知识库",
+            namespace="pdf_shared_default",
+        )
+
+        shared = self.documents.list_knowledge_bases(user_id="__shared__")
+
+        self.assertEqual(shared[0]["name"], "共享知识库")
+
     def test_replacement_is_idempotent_and_namespaces_are_isolated(self) -> None:
         self.assertFalse(self.pipeline.has_document("intro"))
         self.pipeline.add_text(text="Python old", document_id="intro")
@@ -178,6 +277,10 @@ class RAGPipelineTest(unittest.TestCase):
         self.assertEqual(listed[0]["chunk_count"], 1)
         self.assertEqual(removed["document_id"], "python")
         self.assertFalse(self.pipeline.has_document("python"))
+        self.assertEqual(
+            self.documents.get_chunk_ids(namespace="test", document_id="python"),
+            [],
+        )
         self.assertEqual(self.pipeline.stats()["documents"], 0)
         self.assertEqual(
             self.vectors.client.retrieve(
@@ -345,11 +448,11 @@ class DocumentProcessorTest(unittest.TestCase):
             path.write_bytes(b"PNG")
             with (
                 patch(
-                    "hello_agents_practice.memory.rag.document.shutil.which",
+                    "hello_agents_framework.memory.rag.document.shutil.which",
                     return_value="/opt/homebrew/bin/tesseract",
                 ),
                 patch(
-                    "hello_agents_practice.memory.rag.document.subprocess.run",
+                    "hello_agents_framework.memory.rag.document.subprocess.run",
                     side_effect=[
                         SimpleNamespace(stdout="eng\nchi_sim\n"),
                         SimpleNamespace(stdout="识别出的 合同 条款"),
@@ -373,11 +476,11 @@ class DocumentProcessorTest(unittest.TestCase):
             path.write_bytes(b"PNG")
             with (
                 patch(
-                    "hello_agents_practice.memory.rag.document.shutil.which",
+                    "hello_agents_framework.memory.rag.document.shutil.which",
                     return_value="/opt/homebrew/bin/tesseract",
                 ),
                 patch(
-                    "hello_agents_practice.memory.rag.document.subprocess.run",
+                    "hello_agents_framework.memory.rag.document.subprocess.run",
                     return_value=SimpleNamespace(stdout="eng\n"),
                 ) as run,
             ):
