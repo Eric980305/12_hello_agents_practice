@@ -25,6 +25,8 @@ from apps.pdf_learning_assistant import (
     format_document_load_result,
     format_initialization_error,
     main,
+    manager_table_height,
+    manager_table_update,
     normalize_primary_view,
     primary_view_visibility,
     stage_chat_message,
@@ -139,6 +141,20 @@ class FakeLLM:
 
 
 class ChatInteractionTest(unittest.TestCase):
+    def test_manager_table_update_resizes_rows_with_backend_state(self) -> None:
+        rows = [["共享知识库", "不可删除"], ["新知识库", "删除"]]
+
+        update = manager_table_update(rows)
+
+        self.assertEqual(update["value"], rows)
+        self.assertEqual(update["row_count"], 2)
+        self.assertEqual(update["max_height"], manager_table_height(2))
+
+    def test_manager_table_height_shrinks_after_a_row_is_removed(self) -> None:
+        self.assertEqual(manager_table_height(5), 272)
+        self.assertEqual(manager_table_height(4), 228)
+        self.assertEqual(manager_table_height(0), 96)
+
     def test_document_table_height_tracks_backend_rows_and_caps_viewport(self) -> None:
         self.assertEqual(document_table_height(0), 96)
         self.assertEqual(document_table_height(1), 96)

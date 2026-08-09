@@ -349,7 +349,11 @@ html, body { max-width: 100%; min-height: 100%; overflow-x: clip; }
     transform: translateY(-50%) !important;
     border-radius: 9px !important;
 }
-.manager-knowledge-base-table { margin-top: 0.5rem !important; }
+.manager-knowledge-base-table {
+    flex: 0 0 auto !important;
+    min-height: 0 !important;
+    margin-top: 0.5rem !important;
+}
 .manager-knowledge-base-table .body-cell[data-col="1"] {
     color: #dc2626 !important;
     cursor: pointer;
@@ -528,6 +532,28 @@ html, body { max-width: 100%; min-height: 100%; overflow-x: clip; }
     background: var(--background-fill-primary) !important;
     box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35) !important;
 }
+/* Gradio copies elem_classes onto an outer block and its inner wrapper. Keep
+   the outer block as the only modal surface so dialogs do not render as
+   concentric cards. */
+.modal-overlay > .modal-overlay {
+    position: static !important;
+    inset: auto !important;
+    z-index: auto !important;
+    display: contents !important;
+    padding: 0 !important;
+    background: transparent !important;
+}
+.modal-card > .modal-card {
+    display: contents !important;
+    width: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
 .modal-header {
     align-items: center !important;
     padding: 1.1rem 1.25rem !important;
@@ -557,7 +583,21 @@ html, body { max-width: 100%; min-height: 100%; overflow-x: clip; }
     color: #ffffff !important;
 }
 .manager-close:hover { background: #b91c1c !important; }
-.confirm-card { width: min(520px, 94vw) !important; padding: 1.25rem !important; }
+.confirm-card {
+    width: min(520px, 94vw) !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+.confirm-card .styler {
+    overflow: hidden !important;
+    border: 1px solid var(--border-color-primary) !important;
+    border-radius: 16px !important;
+    background: var(--background-fill-primary) !important;
+}
 @media (max-width: 768px) {
     .gradio-container {
         width: 100vw !important;
@@ -690,6 +730,43 @@ html, body { max-width: 100%; min-height: 100%; overflow-x: clip; }
         width: 100% !important;
         max-height: calc(100dvh - 1rem) !important;
         border-radius: 18px 18px 0 0 !important;
+    }
+    .confirm-card {
+        width: 100% !important;
+        border-radius: 0 !important;
+        background: transparent !important;
+    }
+    .confirm-card .styler { border-radius: 18px 18px 0 0 !important; }
+    #create-knowledge-base-overlay.modal-overlay {
+        position: fixed !important;
+        inset: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        width: 100vw !important;
+        height: 100dvh !important;
+        max-width: none !important;
+        margin: 0 !important;
+        transform: none !important;
+        padding:
+            max(1rem, env(safe-area-inset-top))
+            1rem
+            max(1rem, env(safe-area-inset-bottom)) !important;
+        box-sizing: border-box !important;
+    }
+#create-knowledge-base-overlay .confirm-card {
+    width: min(520px, 100%) !important;
+    max-width: 520px !important;
+    max-height: calc(100dvh - 2rem) !important;
+    height: auto !important;
+    min-height: 0 !important;
+    flex: 0 0 auto !important;
+    align-self: center !important;
+    margin: 0 auto !important;
+    box-sizing: border-box !important;
+}
+    #create-knowledge-base-overlay .confirm-card .styler {
+        border-radius: 18px !important;
     }
     .modal-header { align-items: center !important; }
     .modal-header h2 { font-size: 1.15rem !important; }
@@ -1735,6 +1812,21 @@ def document_table_height(row_count: int) -> int:
     return 52 + visible_rows * 44
 
 
+def manager_table_height(row_count: int) -> int:
+    """Fit the knowledge-base manager table to its current rows."""
+    visible_rows = min(max(row_count, 1), 8)
+    return 52 + visible_rows * 44
+
+
+def manager_table_update(rows: list[list[str]]) -> dict[str, Any]:
+    """Update manager rows and its rendered row count together."""
+    return gr.update(
+        value=rows,
+        row_count=len(rows),
+        max_height=manager_table_height(len(rows)),
+    )
+
+
 def create_gradio_app(
     factory: Callable[[str], PDFLearningAssistant] = create_pdf_learning_assistant,
     user_store: UserAccountStore | None = None,
@@ -1833,6 +1925,14 @@ def create_gradio_app(
             for item in knowledge_bases
         ]
         return rows, [item["id"] for item in knowledge_bases]
+
+    def refresh_manager_knowledge_bases(token: str):
+        """Re-read persisted knowledge bases after a manager mutation."""
+        assistant = sessions.get(token)
+        if assistant is None:
+            return manager_table_update([]), []
+        rows, knowledge_base_ids = manager_knowledge_base_state(assistant)
+        return manager_table_update(rows), knowledge_base_ids
 
     def note_state(
         assistant: PDFLearningAssistant,
@@ -2048,7 +2148,8 @@ def create_gradio_app(
             return (
                 "❌ 助手尚未就绪。", "❌ 助手尚未就绪。",
                 gr.Dropdown(), gr.Dropdown(), name,
-                document_table_update([]), [], [], [], [], gr.Group(visible=True),
+                document_table_update([]), [], [], manager_table_update([]), [],
+                gr.Group(visible=True), gr.Group(visible=False),
             )
         try:
             result = assistant.create_knowledge_base(name)
@@ -2060,9 +2161,10 @@ def create_gradio_app(
                 knowledge_base_update(assistant, result["id"]),
                 "",
                 *library_state(assistant, result["id"]),
-                manager_rows,
+                manager_table_update(manager_rows),
                 manager_ids,
                 gr.Group(visible=False),
+                gr.Group(visible=True),
             )
         except Exception as error:
             manager_rows, manager_ids = manager_knowledge_base_state(assistant)
@@ -2073,9 +2175,10 @@ def create_gradio_app(
                 knowledge_base_update(assistant, qa_knowledge_base_id),
                 name,
                 *library_state(assistant, management_knowledge_base_id),
-                manager_rows,
+                manager_table_update(manager_rows),
                 manager_ids,
                 gr.Group(visible=True),
+                gr.Group(visible=False),
             )
 
     def select_management_knowledge_base(knowledge_base_id: str, token: str):
@@ -2116,9 +2219,9 @@ def create_gradio_app(
     def open_knowledge_base_manager(token: str):
         assistant = sessions.get(token)
         if assistant is None:
-            return [], [], "❌ 助手尚未就绪。", gr.Group(visible=True)
+            return manager_table_update([]), [], "❌ 助手尚未就绪。", gr.Group(visible=True)
         rows, ids = manager_knowledge_base_state(assistant)
-        return rows, ids, "", gr.Group(visible=True)
+        return manager_table_update(rows), ids, "", gr.Group(visible=True)
 
     def request_knowledge_base_deletion(
         knowledge_base_ids: list[str],
@@ -2146,7 +2249,7 @@ def create_gradio_app(
         assistant = sessions.get(token)
         if assistant is None:
             return (
-                [], [], "❌ 助手尚未就绪。", gr.Dropdown(), gr.Dropdown(),
+                manager_table_update([]), [], "❌ 助手尚未就绪。", gr.Dropdown(), gr.Dropdown(),
                 "❌ 助手尚未就绪。", document_table_update([]), [], [], "",
                 gr.Group(visible=False),
             )
@@ -2160,7 +2263,7 @@ def create_gradio_app(
             next_qa = "default" if qa_knowledge_base_id == knowledge_base_id else qa_knowledge_base_id
             manager_rows, manager_ids = manager_knowledge_base_state(assistant)
             return (
-                manager_rows,
+                manager_table_update(manager_rows),
                 manager_ids,
                 f"✅ 已删除「{removed['name']}」及其中 {removed['documents_deleted']} 个文档。",
                 management_knowledge_base_update(assistant, next_management),
@@ -2173,7 +2276,7 @@ def create_gradio_app(
         except Exception as error:
             manager_rows, manager_ids = manager_knowledge_base_state(assistant)
             return (
-                manager_rows, manager_ids, f"❌ 删除失败：{error}",
+                manager_table_update(manager_rows), manager_ids, f"❌ 删除失败：{error}",
                 management_knowledge_base_update(assistant, management_knowledge_base_id),
                 knowledge_base_update(assistant, qa_knowledge_base_id),
                 f"❌ 删除失败：{error}",
@@ -2183,6 +2286,14 @@ def create_gradio_app(
 
     def close_overlay():
         return gr.Group(visible=False)
+
+    def open_create_knowledge_base_dialog():
+        """Replace the manager modal with the create modal."""
+        return gr.Group(visible=False), gr.Group(visible=True)
+
+    def cancel_create_knowledge_base_dialog():
+        """Return to the manager modal without stacking two surfaces."""
+        return gr.Group(visible=False), gr.Group(visible=True)
 
     def select_qa_knowledge_base(knowledge_base_id: str, token: str):
         assistant = sessions.get(token)
@@ -2515,12 +2626,13 @@ def create_gradio_app(
                     with gr.Column(elem_classes=["modal-body"]):
                         manager_status = gr.Markdown()
                         manager_knowledge_bases = gr.Dataframe(
-                            headers=["知识库", "操作"],
-                            datatype=["str", "str"], value=[], type="array",
-                            interactive=False, wrap=False, buttons=[],
-                            column_widths=["72%", "28%"],
-                            elem_classes=["manager-knowledge-base-table"],
-                        )
+                                headers=["知识库", "操作"],
+                                datatype=["str", "str"], value=[], type="array",
+                                interactive=False, wrap=False, buttons=[], row_count=0,
+                                max_height=manager_table_height(0),
+                                column_widths=["72%", "28%"],
+                                elem_classes=["manager-knowledge-base-table"],
+                            )
                     with gr.Row(elem_classes=["modal-footer"]):
                         close_knowledge_base_manager = gr.Button(
                             "关闭",
@@ -2530,7 +2642,11 @@ def create_gradio_app(
                             elem_classes=["manager-close"],
                         )
 
-            with gr.Group(visible=False, elem_classes=["modal-overlay"]) as create_knowledge_base_dialog:
+            with gr.Group(
+                visible=False,
+                elem_id="create-knowledge-base-overlay",
+                elem_classes=["modal-overlay"],
+            ) as create_knowledge_base_dialog:
                 with gr.Group(elem_classes=["modal-card", "confirm-card"]):
                     gr.Markdown("## 新建知识库")
                     new_knowledge_base = gr.Textbox(label="知识库名称", placeholder="例如：法律法规")
@@ -2693,14 +2809,14 @@ def create_gradio_app(
             outputs=knowledge_base_manager,
         )
         open_create_knowledge_base.click(
-            lambda: gr.Group(visible=True),
-            outputs=create_knowledge_base_dialog,
+            open_create_knowledge_base_dialog,
+            outputs=[knowledge_base_manager, create_knowledge_base_dialog],
         )
         cancel_create_knowledge_base.click(
-            close_overlay,
-            outputs=create_knowledge_base_dialog,
+            cancel_create_knowledge_base_dialog,
+            outputs=[create_knowledge_base_dialog, knowledge_base_manager],
         )
-        create_knowledge_base_button.click(
+        create_knowledge_base_event = create_knowledge_base_button.click(
             create_knowledge_base,
             inputs=[
                 new_knowledge_base,
@@ -2720,7 +2836,13 @@ def create_gradio_app(
                 manager_knowledge_bases,
                 manager_knowledge_base_ids,
                 create_knowledge_base_dialog,
+                knowledge_base_manager,
             ],
+        )
+        create_knowledge_base_event.then(
+            refresh_manager_knowledge_bases,
+            inputs=session_token,
+            outputs=[manager_knowledge_bases, manager_knowledge_base_ids],
         )
         cancel_delete_knowledge_base_button.click(
             close_overlay,

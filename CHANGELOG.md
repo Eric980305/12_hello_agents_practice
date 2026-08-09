@@ -4,6 +4,14 @@ This file records user-visible milestones for `12_hello_agents_practice`.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-08-09
+
+### Fixed
+
+- Made the knowledge-base manager table resize immediately after catalog creation or deletion.
+- Refined the create-knowledge-base and manager dialogs to use a single responsive surface without residual mobile whitespace.
+- Added regression coverage for dynamic manager-table row counts and height updates.
+
 ## [0.2.1] - 2026-08-08
 
 ### Changed
