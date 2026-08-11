@@ -51,7 +51,7 @@ SUPPORTED_FILE_SUFFIXES = {
     ".markdown", ".md", ".pdf", ".png", ".pptx", ".tif", ".tiff", ".txt",
     ".webp", ".xls", ".xlsx", ".xml",
 }
-PENDING_ANSWER = "⏳ 正在检索当前知识库…"
+PENDING_ANSWER = "⏳ 正在检索当前专家…"
 ALL_KNOWLEDGE_BASES = "__all__"
 SHARED_KNOWLEDGE_OWNER = "__shared__"
 SHARED_KNOWLEDGE_NAMESPACE = "pdf_shared_default"
@@ -205,6 +205,11 @@ html, body { max-width: 100%; min-height: 100%; overflow-x: clip; }
     margin: 0 !important;
     padding: 1.75rem 2rem 1.1rem !important;
     text-align: center;
+}
+.auth-normal {
+    margin: 0;
+    padding: 0.01rem 0.68rem 1.1rem;
+    text-align: left;
 }
 .auth-heading h1 { margin: 0 0 0.4rem !important; font-size: 1.75rem !important; }
 .auth-heading p { margin: 0 !important; color: var(--body-text-color-subdued); }
@@ -863,8 +868,8 @@ class PDFLearningAssistant:
         self.max_file_bytes = max_file_bytes
         self.rag_tool_factory = rag_tool_factory
         self.knowledge_store = knowledge_store
-        self.knowledge_bases = dict(knowledge_bases or {"default": "共享知识库"})
-        self.knowledge_bases["default"] = "共享知识库"
+        self.knowledge_bases = dict(knowledge_bases or {"default": "共享专家库"})
+        self.knowledge_bases["default"] = "共享专家库"
         self.rag_tools = {"default": rag_tool}
         self.current_knowledge_base_id = "default"
         self.session_start = datetime.now(timezone.utc)
@@ -881,9 +886,9 @@ class PDFLearningAssistant:
             knowledge_base_id = knowledge_base["id"]
             existing_name = knowledge_base["name"]
             if existing_name.casefold() == normalized.casefold():
-                raise ValueError("知识库名称已存在。")
+                raise ValueError("专家名称已存在。")
         if self.rag_tool_factory is None or self.knowledge_store is None:
-            raise RuntimeError("当前运行方式未配置持久化知识库工厂。")
+            raise RuntimeError("当前运行方式未配置持久化专家工厂。")
         knowledge_base_id = hashlib.sha256(
             normalized.casefold().encode("utf-8")
         ).hexdigest()[:16]
@@ -907,16 +912,16 @@ class PDFLearningAssistant:
     ) -> dict[str, object]:
         """Delete an owned knowledge base and all of its indexed resources."""
         if not confirmed:
-            raise ValueError("删除知识库前必须确认。")
+            raise ValueError("删除专家前必须确认。")
         if knowledge_base_id == "default":
-            raise ValueError("共享知识库不能删除。")
+            raise ValueError("共享专家库不能删除。")
         if self.knowledge_store is None:
-            raise RuntimeError("当前运行方式未配置持久化知识库。")
+            raise RuntimeError("当前运行方式未配置持久化专家。")
 
         knowledge_bases = {item["id"]: item for item in self.list_knowledge_bases()}
         target = knowledge_bases.get(knowledge_base_id)
         if target is None or target.get("owner_user_id") != self.user_id:
-            raise ValueError("所选知识库不存在或无权删除。")
+            raise ValueError("所选专家不存在或无权删除。")
 
         documents = self.list_documents(knowledge_base_id)
         for document in documents:
@@ -930,7 +935,7 @@ class PDFLearningAssistant:
             knowledge_base_id=knowledge_base_id,
         )
         if not deleted:
-            raise ValueError("所选知识库不存在或已被删除。")
+            raise ValueError("所选专家不存在或已被删除。")
         self.rag_tools.pop(knowledge_base_id, None)
         self.knowledge_bases.pop(knowledge_base_id, None)
         if self.current_knowledge_base_id == knowledge_base_id:
@@ -983,10 +988,10 @@ class PDFLearningAssistant:
             "knowledge_base_id",
         )
         if normalized not in self.knowledge_bases:
-            raise ValueError("所选知识库不存在。")
+            raise ValueError("所选专家不存在。")
         if normalized not in self.rag_tools:
             if self.rag_tool_factory is None:
-                raise RuntimeError("当前运行方式无法加载该知识库。")
+                raise RuntimeError("当前运行方式无法加载该专家。")
             self.rag_tools[normalized] = self.rag_tool_factory(normalized)
         return normalized, self.knowledge_bases[normalized], self.rag_tools[normalized]
 
@@ -1183,7 +1188,7 @@ class PDFLearningAssistant:
             }:
                 reason = "Embedding 服务调用失败，请检查 EMBED_* 配置、额度和网络。"
             else:
-                reason = f"文件解析或知识库写入失败（{error_name}）。"
+                reason = f"文件解析或专家写入失败（{error_name}）。"
             return {"success": False, "message": reason}
 
     def ask(
@@ -1226,7 +1231,7 @@ class PDFLearningAssistant:
                 [],
                 knowledge_base_id=resolved_id,
             )
-            unavailable = "没有从当前知识库检索到足够相关的原文，暂时无法回答。"
+            unavailable = "没有从当前专家检索到足够相关的原文，暂时无法回答。"
             self.conversations.append(
                 {
                     "knowledge_base_id": resolved_id,
@@ -1385,7 +1390,7 @@ class PDFLearningAssistant:
         resolved_id, _, _ = self._knowledge_base_context(knowledge_base_id)
         manager = getattr(self.memory_tool, "manager", None)
         if manager is None or not hasattr(manager, "list_memories"):
-            return "当前知识库没有可回顾的学习记录。"
+            return "当前专家没有可回顾的学习记录。"
         events = [
             item
             for item in manager.list_memories(
@@ -1403,7 +1408,7 @@ class PDFLearningAssistant:
         selected = matches or events
         selected.sort(key=lambda item: item.created_at, reverse=True)
         if not selected:
-            return "当前知识库没有可回顾的学习记录。"
+            return "当前专家没有可回顾的学习记录。"
         return "\n".join(
             f"- {self._display_time(item.created_at.isoformat())} · {item.content}"
             for item in selected[:limit]
@@ -1416,7 +1421,7 @@ class PDFLearningAssistant:
             "加载文档": self.documents_loaded,
             "提问次数": self.questions_asked,
             "学习笔记": self.notes_added,
-            "当前知识库": self.knowledge_bases[self.current_knowledge_base_id],
+            "当前专家": self.knowledge_bases[self.current_knowledge_base_id],
             "当前文档": self.current_document or "未加载",
         }
 
@@ -1465,7 +1470,7 @@ class PDFLearningAssistant:
                     {
                         "role": "user",
                         "content": (
-                            f"来源知识库：{resolved_name}\n\n"
+                            f"来源专家：{resolved_name}\n\n"
                             f"本次会话真实问答：\n{transcript}\n\n"
                             "请按“讨论主题、关键结论、未解决问题”简洁总结。"
                         ),
@@ -1482,7 +1487,7 @@ class PDFLearningAssistant:
                     "rag_status": rag_tool.stats(),
                 }
             )
-            summary_sections.append(f"## 来源知识库：{resolved_name}\n\n{summary}")
+            summary_sections.append(f"## 来源专家：{resolved_name}\n\n{summary}")
 
         learning_summary = "\n\n".join(summary_sections)
         duration = (datetime.now(timezone.utc) - self.session_start).total_seconds()
@@ -1676,12 +1681,12 @@ def create_pdf_learning_assistant(
     knowledge_store.ensure_knowledge_base(
         user_id=SHARED_KNOWLEDGE_OWNER,
         knowledge_base_id="default",
-        name="共享知识库",
+        name="共享专家库",
         namespace=SHARED_KNOWLEDGE_NAMESPACE,
     )
     knowledge_store.rename_knowledge_base_display_name(
-        old_name="默认知识库",
-        new_name="共享知识库",
+        old_name="默认专家",
+        new_name="共享专家库",
     )
     knowledge_bases = {
         item["id"]: item["name"]
@@ -1865,7 +1870,7 @@ def create_gradio_app(
         assistant: PDFLearningAssistant,
         value: str = ALL_KNOWLEDGE_BASES,
     ) -> dict[str, Any]:
-        choices = [("所有知识库", ALL_KNOWLEDGE_BASES)] + [
+        choices = [("所有专家", ALL_KNOWLEDGE_BASES)] + [
             (item["name"], item["id"])
             for item in assistant.list_knowledge_bases()
         ]
@@ -2187,7 +2192,7 @@ def create_gradio_app(
             return "❌ 助手尚未就绪。", document_table_update([]), [], []
         try:
             if knowledge_base_id == ALL_KNOWLEDGE_BASES:
-                name = "所有知识库"
+                name = "所有专家"
             else:
                 _, name, _ = assistant._knowledge_base_context(knowledge_base_id)
             return f"正在管理「{name}」", *library_state(assistant, knowledge_base_id)
@@ -2236,9 +2241,9 @@ def create_gradio_app(
             return "", "", gr.Group(visible=False)
         knowledge_base_id = knowledge_base_ids[row_index]
         if knowledge_base_id == "default":
-            return "", "共享知识库不能删除。", gr.Group(visible=False)
+            return "", "共享专家库不能删除。", gr.Group(visible=False)
         name = str(rows[row_index][0])
-        return knowledge_base_id, f"确认删除知识库「{name}」？", gr.Group(visible=True)
+        return knowledge_base_id, f"确认删除专家「{name}」？", gr.Group(visible=True)
 
     def delete_selected_knowledge_base(
         knowledge_base_id: str,
@@ -2268,7 +2273,7 @@ def create_gradio_app(
                 f"✅ 已删除「{removed['name']}」及其中 {removed['documents_deleted']} 个文档。",
                 management_knowledge_base_update(assistant, next_management),
                 knowledge_base_update(assistant, next_qa),
-                f"正在管理「{'所有知识库' if next_management == ALL_KNOWLEDGE_BASES else assistant.knowledge_bases[next_management]}」",
+                f"正在管理「{'所有专家' if next_management == ALL_KNOWLEDGE_BASES else assistant.knowledge_bases[next_management]}」",
                 *library_state(assistant, next_management),
                 "",
                 gr.Group(visible=False),
@@ -2312,7 +2317,7 @@ def create_gradio_app(
         if knowledge_base_id == ALL_KNOWLEDGE_BASES:
             rows, document_ids = document_state(assistant, knowledge_base_id)
             return (
-                "❌ 上传前请先在左侧选择一个具体知识库。",
+                "❌ 上传前请先在左侧选择一个具体专家。",
                 document_table_update(rows),
                 document_ids,
                 None,
@@ -2420,7 +2425,7 @@ def create_gradio_app(
                 "### 本次会话问答总结\n\n"
                 f"{report['learning_summary']}\n\n"
                 f"---\n本次总结包含 {metrics['questions_asked']} 次真实问答，"
-                f"涉及 {metrics['knowledge_bases_used']} 个知识库。"
+                f"涉及 {metrics['knowledge_bases_used']} 个专家。"
                 "报告已保存到当前用户目录。"
             )
         except ValueError as error:
@@ -2428,7 +2433,7 @@ def create_gradio_app(
         except Exception as error:
             return f"❌ 报告生成失败（{type(error).__name__}）。"
 
-    with gr.Blocks(title="浚民的智能知识库") as demo:
+    with gr.Blocks(title="智能专家平台") as demo:
         # BrowserState survives a normal page refresh; the server-side session remains
         # authoritative and is removed explicitly when the user logs out.
         session_token = gr.BrowserState(
@@ -2447,8 +2452,12 @@ def create_gradio_app(
 
         with gr.Group(elem_classes=["auth-shell"]) as auth_shell:
             gr.Markdown(
-                "# 📚 欢迎来到浚民的智能知识库\n登录后管理你的资料、对话和学习报告。",
+                "# 📚 欢迎来到智能专家平台\n### 作者：浚民",
                 elem_classes=["auth-heading"],
+            ) # 创建属于你的专家团队，选择一位专家，开始智能问答。
+            gr.Markdown(
+                "创建属于你的专家团队，选择一位专家，开始智能问答。",
+                elem_classes=["auth-normal"],
             )
             with gr.Group(elem_classes=["auth-panel"]) as login_panel:
                 auth_status = gr.Markdown(elem_classes=["auth-status"])
@@ -2495,7 +2504,7 @@ def create_gradio_app(
         with gr.Group(visible=False) as app_shell:
             with gr.Row(elem_classes=["app-topbar"]):
                 gr.Markdown(
-                    "# 📚 浚民的智能知识库\n按知识库管理资料、提问和记录笔记。",
+                    "# 📚 智能专家平台\n### 作者：浚民\n创建属于你的专家团队，选择一位专家，开始智能问答。",
                     elem_classes=["app-header"],
                 )
                 with gr.Column(scale=0, min_width=120):
@@ -2505,8 +2514,8 @@ def create_gradio_app(
             primary_navigation = gr.Radio(
                 choices=[
                     ("💬 智能问答", "chat"),
-                    ("🗂️ 知识库", "library"),
-                    ("📊 学习统计", "stats"),
+                    ("🗂️ 专家团", "library"),
+                    ("📊 询问统计", "stats"),
                 ],
                 value="chat",
                 show_label=False,
@@ -2519,23 +2528,23 @@ def create_gradio_app(
                     with gr.Column(scale=2, min_width=300):
                         with gr.Group(elem_classes=["knowledge-picker-card"]):
                             with gr.Row(elem_classes=["knowledge-card-header"]):
-                                gr.Markdown("**知识库**")
+                                gr.Markdown("**专家团**")
                                 manage_knowledge_bases_button = gr.Button(
-                                    "管理知识库",
+                                    "管理专家",
                                     size="sm",
                                     scale=0,
                                     elem_classes=["compact-action"],
                                 )
                             management_knowledge_base = gr.Dropdown(
-                                label="选择知识库",
+                                label="选择专家",
                                 show_label=False,
-                                choices=[("所有知识库", ALL_KNOWLEDGE_BASES)],
+                                choices=[("所有专家", ALL_KNOWLEDGE_BASES)],
                                 value=ALL_KNOWLEDGE_BASES,
                                 interactive=True,
                                 filterable=True,
                                 allow_custom_value=True,
                             )
-                        management_status = gr.Markdown("正在管理「所有知识库」")
+                        management_status = gr.Markdown("正在管理「所有专家」")
                     with gr.Column(scale=5, min_width=0, elem_classes=["library-content"]):
                         with gr.Tab("文档"):
                             with gr.Row(elem_classes=["document-search-row"]):
@@ -2547,7 +2556,7 @@ def create_gradio_app(
                                     html_attributes={"enterkeyhint": "search"},
                                 )
                             documents_table = gr.Dataframe(
-                                headers=["文件名", "所属知识库", "操作"],
+                                headers=["文件名", "所属专家", "操作"],
                                 datatype=["str", "str", "str"],
                                 value=[], type="array", interactive=False, wrap=False,
                                 line_breaks=False, max_height=document_table_height(0),
@@ -2568,7 +2577,7 @@ def create_gradio_app(
                                 note_search = gr.Textbox(label="搜索笔记", placeholder="输入笔记内容", scale=8)
                                 note_sort_button = gr.Button("↕", size="sm", scale=0, min_width=48, elem_id="note-sort-button")
                             notes_table = gr.Dataframe(
-                                headers=["笔记", "所属知识库", "创建时间"],
+                                headers=["笔记", "所属专家", "创建时间"],
                                 datatype=["str", "str", "str"], value=[], type="array",
                                 interactive=False, wrap=True, buttons=[],
                             )
@@ -2577,13 +2586,13 @@ def create_gradio_app(
                 with gr.Column(elem_classes=["chat-shell"]):
                     chatbot = gr.Chatbot(
                         label="对话历史", height=440, layout="bubble",
-                        placeholder="今天有什么想询问知识库的吗？",
+                        placeholder="今天有什么想询问专家的吗？",
                         elem_classes=["chat-history"],
                     )
                     pending_question = gr.State("")
                     with gr.Row(elem_classes=["chat-controls"]):
                         qa_knowledge_base = gr.Dropdown(
-                            label="选择知识库", choices=[("共享知识库", "default")],
+                            label="选择专家", choices=[("共享专家库", "default")],
                             value="default", interactive=True, show_label=False,
                             container=False, min_width=176, filterable=True,
                             allow_custom_value=True,
@@ -2597,7 +2606,7 @@ def create_gradio_app(
                         with gr.Row(elem_classes=["chat-input-row"]):
                             question = gr.Textbox(
                                 label="输入问题", show_label=False,
-                                placeholder="基于当前知识库提问",
+                                placeholder="基于当前专家提问",
                                 lines=1, max_lines=5, scale=1,
                                 elem_classes=["chat-question"],
                             )
@@ -2606,7 +2615,7 @@ def create_gradio_app(
                                 elem_classes=["chat-send"],
                             )
                 with gr.Accordion("📝 记录本次对话笔记", open=False):
-                    note_binding_status = gr.Markdown("笔记将自动保存到「共享知识库」。")
+                    note_binding_status = gr.Markdown("笔记将自动保存到「共享专家库」。")
                     note = gr.Textbox(label="笔记内容", lines=3)
                     note_button = gr.Button("保存笔记", variant="primary")
                     note_status = gr.Textbox(label="保存状态", interactive=False)
@@ -2621,12 +2630,12 @@ def create_gradio_app(
             with gr.Group(visible=False, elem_classes=["modal-overlay"]) as knowledge_base_manager:
                 with gr.Group(elem_classes=["modal-card"]):
                     with gr.Row(elem_classes=["modal-header"]):
-                        gr.Markdown("## 管理知识库\n创建或删除个人知识库。共享知识库不可删除。")
-                        open_create_knowledge_base = gr.Button("新建知识库", variant="primary", size="sm", scale=0)
+                        gr.Markdown("## 管理专家\n创建或删除专属专家。共享专家库不可删除。")
+                        open_create_knowledge_base = gr.Button("新建一个专家", variant="primary", size="sm", scale=0)
                     with gr.Column(elem_classes=["modal-body"]):
                         manager_status = gr.Markdown()
                         manager_knowledge_bases = gr.Dataframe(
-                                headers=["知识库", "操作"],
+                                headers=["专家", "操作"],
                                 datatype=["str", "str"], value=[], type="array",
                                 interactive=False, wrap=False, buttons=[], row_count=0,
                                 max_height=manager_table_height(0),
@@ -2648,16 +2657,16 @@ def create_gradio_app(
                 elem_classes=["modal-overlay"],
             ) as create_knowledge_base_dialog:
                 with gr.Group(elem_classes=["modal-card", "confirm-card"]):
-                    gr.Markdown("## 新建知识库")
-                    new_knowledge_base = gr.Textbox(label="知识库名称", placeholder="例如：法律法规")
+                    gr.Markdown("## 新建一个专家")
+                    new_knowledge_base = gr.Textbox(label="专家名称", placeholder="例如：法律法规")
                     with gr.Row():
                         cancel_create_knowledge_base = gr.Button("取消")
                         create_knowledge_base_button = gr.Button("创建", variant="primary")
 
             with gr.Group(visible=False, elem_classes=["modal-overlay"]) as delete_knowledge_base_dialog:
                 with gr.Group(elem_classes=["modal-card", "confirm-card"]):
-                    delete_knowledge_base_confirmation_text = gr.Markdown("确认删除这个知识库？")
-                    gr.Markdown("删除后，该知识库及其中的文档、检索索引都会移除。")
+                    delete_knowledge_base_confirmation_text = gr.Markdown("确认删除这个专家？")
+                    gr.Markdown("删除后，该专家及其中的文档、检索索引都会移除。")
                     with gr.Row():
                         cancel_delete_knowledge_base_button = gr.Button("取消")
                         confirm_delete_knowledge_base_button = gr.Button("确认删除", variant="stop")
