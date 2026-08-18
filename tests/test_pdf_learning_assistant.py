@@ -4,6 +4,7 @@ import tempfile
 import unittest
 import warnings
 from argparse import Namespace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -205,7 +206,7 @@ class PDFLearningAssistantTest(unittest.TestCase):
             rag_tool=self.rag,
             llm=self.llm,
             knowledge_base_path=root / "knowledge",
-            reports_path=root / "reports",
+            monthly_reports_path=root / "monthly-reports",
         )
         self.pdf_path = root / "Happy LLM.pdf"
         self.pdf_path.write_bytes(b"%PDF-1.4\npractice")
@@ -272,7 +273,7 @@ class PDFLearningAssistantTest(unittest.TestCase):
             knowledge_store=store,
             llm=self.llm,
             knowledge_base_path=root / "default",
-            reports_path=root / "reports-2",
+            monthly_reports_path=root / "monthly-reports-2",
         )
 
         created = assistant.create_knowledge_base("法律法规")
@@ -306,7 +307,7 @@ class PDFLearningAssistantTest(unittest.TestCase):
             knowledge_store=store,
             llm=self.llm,
             knowledge_base_path=root / "shared",
-            reports_path=root / "reports-delete",
+            monthly_reports_path=root / "monthly-reports-delete",
         )
         created = assistant.create_knowledge_base("法律法规")
         document = root / "contract.txt"
@@ -317,7 +318,7 @@ class PDFLearningAssistantTest(unittest.TestCase):
             assistant.create_knowledge_base("  法律法规  ")
         with self.assertRaisesRegex(ValueError, "确认"):
             assistant.delete_knowledge_base(created["id"])
-        with self.assertRaisesRegex(ValueError, "共享知识库不能删除"):
+        with self.assertRaisesRegex(ValueError, "共享专家库不能删除"):
             assistant.delete_knowledge_base("default", confirmed=True)
 
         removed = assistant.delete_knowledge_base(created["id"], confirmed=True)
@@ -361,50 +362,105 @@ class PDFLearningAssistantTest(unittest.TestCase):
         self.assertIn("working", memory_types)
         self.assertGreaterEqual(memory_types.count("episodic"), 2)
 
-    def test_note_recall_stats_and_report_use_real_stage_memory_types(self) -> None:
-        self.assistant.add_note("Attention connects tokens.", "attention")
-        self.assistant.ask("Attention 如何连接 token？")
-        recalled = self.assistant.recall("attention")
-        report = self.assistant.generate_report()
-
-        note_call = self.memory.calls[0]
-        self.assertEqual(note_call[1]["memory_type"], "episodic")
-        self.assertEqual(note_call[1]["metadata"]["event_type"], "learning_note")
-        self.assertEqual(note_call[1]["metadata"]["knowledge_base_id"], "default")
-        self.assertEqual(
-            note_call[1]["metadata"]["knowledge_base_name"],
-            "共享知识库",
+    def test_advanced_retrieval_failure_falls_back_to_basic_search(self) -> None:
+        self.rag.retrieve = Mock(
+            side_effect=[RuntimeError("provider unavailable"), self.rag.results]
         )
-        self.assertIn("Attention connects tokens", recalled)
-        self.assertEqual(report["learning_metrics"]["notes_added"], 1)
-        self.assertEqual(report["learning_metrics"]["questions_asked"], 1)
-        self.assertEqual(report["knowledge_base"]["name"], "共享知识库")
-        self.assertTrue(report["learning_summary"])
-        report_path = Path(report["report_file"])
-        self.assertTrue(report_path.is_file())
-        self.assertTrue(report_path.is_relative_to(self.assistant.reports_path))
 
-    def test_report_groups_current_session_real_qa_by_knowledge_base(self) -> None:
+        answer = self.assistant.ask("Transformer 是什么？", use_advanced_search=True)
+
+        self.assertIn("高级检索暂时不可用", answer)
+        self.assertIn("Transformer 使用自注意力机制", answer)
+        self.assertEqual(self.rag.retrieve.call_count, 2)
+        self.assertTrue(self.rag.retrieve.call_args_list[0].kwargs["enable_mqe"])
+        self.assertNotIn("enable_mqe", self.rag.retrieve.call_args_list[1].kwargs)
+
+    def test_answer_failure_returns_retrieved_evidence(self) -> None:
+        self.llm.invoke = Mock(side_effect=RuntimeError("provider unavailable"))
+
+        answer = self.assistant.ask("Transformer 是什么？")
+
+        self.assertIn("回答模型暂时不可用", answer)
+        self.assertIn("Transformer uses self-attention", answer)
+        self.assertIn("[S1] guide.pdf", answer)
+        self.assertEqual(len(self.assistant.conversations), 1)
+
+    def test_monthly_report_uses_durable_qa_memory(self) -> None:
+        self.assistant.ask("Attention 如何连接 token？")
+        report = self.assistant.generate_monthly_personal_report()
+
+        qa_event = next(
+            item
+            for item in self.memory.items
+            if item.metadata.get("event_type") == "qa_interaction"
+        )
+        self.assertEqual(qa_event.metadata["question"], "Attention 如何连接 token？")
+        self.assertIn("Transformer 使用自注意力机制", qa_event.metadata["answer"])
+        self.assertEqual(report["metrics"]["conversationCount"], 1)
+        self.assertEqual(report["metrics"]["expertsUsed"], 1)
+        self.assertEqual(report["expertSummaries"][0]["expert"]["name"], "共享专家库")
+        self.assertTrue(report["summary"])
+        report_path = Path(report["reportFile"])
+        self.assertTrue(report_path.is_file())
+        self.assertTrue(report_path.is_relative_to(self.assistant.monthly_reports_path))
+        self.assertEqual(report_path.name, f"monthly_personal_report_{report['reportMonth']}.json")
+
+    def test_monthly_report_groups_durable_qa_by_expert(self) -> None:
         second_rag = FakeRAGTool(namespace="kb_user_legal")
         self.assistant.knowledge_bases["legal"] = "法律资料"
         self.assistant.rag_tools["legal"] = second_rag
         self.assistant.ask("共享资料讲了什么？", knowledge_base_id="default")
         self.assistant.ask("法律资料讲了什么？", knowledge_base_id="legal")
+        self.assistant.conversations.clear()
 
-        report = self.assistant.generate_report(save_to_file=False)
+        report = self.assistant.generate_monthly_personal_report(save_to_file=False)
 
-        self.assertEqual(report["learning_metrics"]["questions_asked"], 2)
-        self.assertEqual(report["learning_metrics"]["knowledge_bases_used"], 2)
-        self.assertNotIn("knowledge_base", report)
+        self.assertEqual(report["metrics"]["conversationCount"], 2)
+        self.assertEqual(report["metrics"]["conversationsUsed"], 2)
+        self.assertEqual(report["metrics"]["expertsUsed"], 2)
         self.assertEqual(
-            [item["knowledge_base"]["name"] for item in report["knowledge_base_summaries"]],
-            ["共享知识库", "法律资料"],
+            [item["expert"]["name"] for item in report["expertSummaries"]],
+            ["共享专家库", "法律资料"],
         )
-        self.assertIn("## 来源知识库：共享知识库", report["learning_summary"])
-        self.assertIn("## 来源知识库：法律资料", report["learning_summary"])
+        self.assertIn("## 专家：共享专家库", report["summary"])
+        self.assertIn("## 专家：法律资料", report["summary"])
         report_prompts = [call[0][1]["content"] for call in self.llm.calls[-2:]]
-        self.assertIn("来源知识库：共享知识库", report_prompts[0])
-        self.assertIn("来源知识库：法律资料", report_prompts[1])
+        self.assertIn("专家：共享专家库", report_prompts[0])
+        self.assertIn("专家：法律资料", report_prompts[1])
+
+    def test_monthly_report_excludes_old_and_incomplete_events(self) -> None:
+        self.memory.items.extend(
+            [
+                MemoryItem(
+                    user_id="user-1",
+                    content="old question",
+                    memory_type="episodic",
+                    importance=0.7,
+                    created_at=datetime.now(timezone.utc) - timedelta(days=31),
+                    metadata={
+                        "event_type": "qa_interaction",
+                        "question": "旧问题",
+                        "answer": "旧回答",
+                        "knowledge_base_id": "default",
+                        "knowledge_base_name": "共享专家库",
+                    },
+                ),
+                MemoryItem(
+                    user_id="user-1",
+                    content="legacy question without answer",
+                    memory_type="episodic",
+                    importance=0.7,
+                    metadata={
+                        "event_type": "qa_interaction",
+                        "knowledge_base_id": "default",
+                        "knowledge_base_name": "共享专家库",
+                    },
+                ),
+            ]
+        )
+
+        with self.assertRaisesRegex(ValueError, "最近 30 天"):
+            self.assistant.generate_monthly_personal_report(save_to_file=False)
 
     def test_lists_and_confirmedly_deletes_one_knowledge_base_document(self) -> None:
         loaded = self.assistant.load_document(self.pdf_path)
@@ -422,20 +478,14 @@ class PDFLearningAssistantTest(unittest.TestCase):
         self.assertEqual(self.assistant.list_documents(), [])
         self.assertEqual(list(self.assistant.knowledge_base_path.glob("*.pdf")), [])
 
-    def test_document_and_note_filters_are_scoped_and_time_sorted(self) -> None:
+    def test_document_filters_are_scoped(self) -> None:
         self.assistant.load_document(self.pdf_path)
         text_path = self.pdf_path.with_name("finance.txt")
         text_path.write_text("annual report", encoding="utf-8")
         self.assistant.load_document(text_path)
-        self.assistant.add_note("First note", "legal")
-        self.assistant.add_note("Second note", "finance")
-
         documents = self.assistant.list_documents(query="finance", source_type="txt")
-        notes = self.assistant.list_notes(query="note", concept="finance")
 
         self.assertEqual([item["name"] for item in documents], ["finance.txt"])
-        self.assertEqual([item["content"] for item in notes], ["Second note"])
-        self.assertIn("created_at", notes[0])
 
     def test_explicit_knowledge_base_prevents_shared_selection_leakage(self) -> None:
         root = Path(self.temporary_directory.name)
@@ -458,7 +508,7 @@ class PDFLearningAssistantTest(unittest.TestCase):
             knowledge_store=store,
             llm=self.llm,
             knowledge_base_path=root / "default",
-            reports_path=root / "reports-isolation",
+            monthly_reports_path=root / "monthly-reports-isolation",
         )
         legal = assistant.create_knowledge_base("法律")
         finance = assistant.create_knowledge_base("财务")
@@ -482,24 +532,15 @@ class PDFLearningAssistantTest(unittest.TestCase):
             metadata={"original_name": "finance.pdf"},
         )
 
-        assistant.add_note("法律合同笔记", knowledge_base_id=legal["id"])
-        assistant.add_note("财务报告笔记", knowledge_base_id=finance["id"])
         all_documents = assistant.list_documents(query="pdf", include_all=True)
-        all_notes = assistant.list_notes(query="笔记", include_all=True)
-        legal_notes = assistant.list_notes(legal["id"], query="合同")
 
         assistant.select_knowledge_base(finance["id"])
         answer = assistant.ask("合同？", knowledge_base_id=legal["id"])
 
         self.assertEqual(
-            {item["knowledge_base_name"] for item in all_notes},
-            {"法律", "财务"},
-        )
-        self.assertEqual(
             {item["knowledge_base_name"] for item in all_documents},
             {"法律", "财务"},
         )
-        self.assertEqual([item["content"] for item in legal_notes], ["法律合同笔记"])
         self.assertIn("law.pdf", answer)
         self.assertEqual(len(legal_tool.retrieve_calls), 1)
         self.assertEqual(len(tools[finance["id"]].retrieve_calls), 0)
@@ -548,7 +589,7 @@ class PDFLearningAssistantTest(unittest.TestCase):
                 knowledge_bases=accessible,
                 llm=FakeLLM(),
                 knowledge_base_path=root / user_scope,
-                reports_path=root / "reports" / user_scope,
+                monthly_reports_path=root / "monthly-reports" / user_scope,
             )
 
         stale_alice = build_assistant("alice")
@@ -710,10 +751,7 @@ class AssistantSessionsTest(unittest.TestCase):
                     for component in components
                     if component["type"] == "tabitem"
                 }
-                self.assertEqual(
-                    tabs,
-                    {"文档", "笔记"},
-                )
+                self.assertNotIn("笔记", tabs)
                 component_types = {component["type"] for component in components}
                 self.assertIn("checkbox", component_types)
                 self.assertIn("radio", component_types)
@@ -741,20 +779,19 @@ class AssistantSessionsTest(unittest.TestCase):
                     for component_id, event_name in dependency.get("targets", []):
                         events_by_component.setdefault(component_id, set()).add(event_name)
 
-                library_selector = next(
+                expert_selector = next(
                     component
                     for component in components
                     if component["type"] == "dropdown"
-                    and component.get("props", {}).get("label") == "选择知识库"
+                    and component.get("props", {}).get("label") == "选择专家"
                     and component.get("props", {}).get("value") == ALL_KNOWLEDGE_BASES
                 )
                 text_filters = [
                     component
                     for component in components
-                    if component.get("props", {}).get("label")
-                    in {"搜索文档", "搜索笔记"}
+                    if component.get("props", {}).get("label") == "搜索文档"
                 ]
-                for component in [library_selector]:
+                for component in [expert_selector]:
                     events = events_by_component.get(component["id"], set())
                     self.assertTrue(events)
                     self.assertNotIn("select", events)
@@ -770,8 +807,8 @@ class AssistantSessionsTest(unittest.TestCase):
                 }
                 self.assertNotIn("初始化助手", button_values)
                 self.assertNotIn("加载文档", button_values)
-                self.assertIn("管理知识库", button_values)
-                self.assertIn("新建知识库", button_values)
+                self.assertIn("管理专家", button_values)
+                self.assertIn("新建一个专家", button_values)
                 document_search_props = next(
                     component.get("props", {})
                     for component in components
@@ -781,7 +818,7 @@ class AssistantSessionsTest(unittest.TestCase):
                 self.assertEqual(document_search_props.get("submit_btn"), "搜索")
                 self.assertIn("关闭", button_values)
                 self.assertIn("确认删除", button_values)
-                self.assertIn("↕", button_values)
+                self.assertNotIn("保存笔记", button_values)
                 self.assertIn("登录", button_values)
                 self.assertIn("创建账号", button_values)
                 self.assertIn("退出登录", button_values)
@@ -792,15 +829,12 @@ class AssistantSessionsTest(unittest.TestCase):
                     if component["type"] == "dataframe"
                 }
                 self.assertIn(
-                    ("文件名", "所属知识库", "操作"),
+                    ("文件名", "所属专家", "操作"),
                     dataframe_headers,
                 )
+                self.assertNotIn(("笔记", "所属专家", "创建时间"), dataframe_headers)
                 self.assertIn(
-                    ("笔记", "所属知识库", "创建时间"),
-                    dataframe_headers,
-                )
-                self.assertIn(
-                    ("知识库", "操作"),
+                    ("专家", "操作"),
                     dataframe_headers,
                 )
                 self.assertNotIn(
@@ -840,29 +874,29 @@ class AssistantSessionsTest(unittest.TestCase):
                 self.assertEqual(len(chatbots), 1)
                 self.assertEqual(
                     chatbots[0].get("placeholder"),
-                    "今天有什么想询问知识库的吗？",
+                    "今天有什么想询问专家的吗？",
                 )
                 all_scope_fields = [
                     component.get("props", {})
                     for component in components
                     if component["type"] == "dropdown"
-                    and ("所有知识库", "__all__")
+                    and ("所有专家", "__all__")
                     in component.get("props", {}).get("choices", [])
                 ]
                 self.assertEqual(len(all_scope_fields), 1)
-                self.assertEqual(all_scope_fields[0].get("label"), "选择知识库")
+                self.assertEqual(all_scope_fields[0].get("label"), "选择专家")
                 finite_dropdowns = [
                     component.get("props", {})
                     for component in components
                     if component["type"] == "dropdown"
                     and component.get("props", {}).get("label")
-                    in {"选择知识库", "知识库"}
+                    in {"选择专家", "专家"}
                 ]
                 self.assertTrue(finite_dropdowns)
                 dynamic_dropdowns = [
                     item
                     for item in finite_dropdowns
-                    if item.get("label") == "选择知识库"
+                    if item.get("label") == "选择专家"
                 ]
                 self.assertTrue(dynamic_dropdowns)
                 self.assertTrue(
@@ -895,7 +929,7 @@ class AssistantSessionsTest(unittest.TestCase):
                     component.get("props", {})
                     for component in components
                     if component["type"] == "textbox"
-                    and component.get("props", {}).get("label") == "知识库名称"
+                    and component.get("props", {}).get("label") == "专家名称"
                 ]
                 self.assertEqual(len(knowledge_base_name_fields), 1)
                 dependencies = app.get_config_file()["dependencies"]

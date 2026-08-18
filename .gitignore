@@ -12,8 +12,12 @@ htmlcov/
 
 knowledge_base/
 learning_reports/
+monthly_personal_reports/
 memory_data/
 *.db
 *.db-shm
 *.db-wal
 
+.runtime/
+expert_platform/frontend/node_modules/
+expert_platform/frontend/dist/

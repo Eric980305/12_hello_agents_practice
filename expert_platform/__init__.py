@@ -1,1 +1,1 @@
-"""Frontend/backend separated intelligent expert platform."""
+"""Separated web application for the Intelligent Expert Platform."""

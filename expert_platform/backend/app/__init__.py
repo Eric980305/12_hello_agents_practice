@@ -1,4 +1,4 @@
-"""FastAPI application package."""
+"""Backend application exports."""
 
 from .main import create_app
 

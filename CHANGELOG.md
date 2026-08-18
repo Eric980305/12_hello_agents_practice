@@ -4,6 +4,86 @@ This file records user-visible milestones for `12_hello_agents_practice`.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-18
+
+### Milestone: Secure Expert Platform Administration
+
+### Added
+
+- Added a dry-run-first local administration script for owner-validated deletion of
+  users, private experts, or individual expert documents across SQLite, retained
+  files, and the active RAG/episodic Qdrant collections.
+- Added direct list arguments for deleting multiple users, multiple experts under one
+  user, or multiple documents under one expert with one preflight and confirmation.
+- Added an authenticated same-site administration console for global user, expert,
+  and document inspection with deterministic pagination, retained-file disk usage,
+  protected deletion previews, and metadata-only audit events.
+- Added dependency-free Simplified Chinese and English interface switching across
+  authentication, Q&A, experts, reports, profiles, and administration.
+- Added 10-record pagination to expert-document management after scope and search
+  filtering.
+
+### Removed
+
+- Removed note creation and browsing from the Vue frontend, FastAPI API, shared
+  assistant service, and Gradio UI.
+- Removed persisted `learning_note` events and their derived episodic Qdrant points
+  without affecting completed Q&A used by monthly reports.
+
+### Changed
+
+- Tightened the existing `expert_web_sessions` lifecycle without adding session
+  entities: startup and login remove expired/orphaned rows, resolution removes an
+  expired or orphaned presented token, re-login replaces only the current browser
+  session, and logout remains successful when the server-side row is already absent.
+- Replaced the current-session inquiry-statistics surface with a personal monthly
+  report covering the signed-in user's previous 30 days of completed expert Q&A.
+- Persist complete question/answer pairs in existing user-scoped `qa_interaction`
+  episodic records so reporting survives logout, independent browser sessions, and
+  backend restarts.
+- Group monthly summaries by the expert identity recorded at conversation time and
+  limit model input to the newest 30 turns per expert.
+- Save one atomic snapshot per user and generation month under
+  `monthly_personal_reports/`; existing `learning_reports/` files remain untouched.
+- Moved local administrator and destructive-maintenance commands under
+  `expert_platform.cli`, with shared deletion planning in the backend domain module.
+- Added immutable-user-ID administrator roles, bounded login-rate limiting,
+  same-origin checks for destructive browser requests, hardened response headers,
+  and immediate session invalidation after role revocation.
+
+### Verified
+
+- Added focused Session coverage for startup cleanup, lazy expiry deletion,
+  current-browser re-login replacement, valid multi-browser preservation, and
+  idempotent logout.
+- Added focused coverage for durable report input, expert grouping, rolling-window
+  filtering, incomplete legacy records, and the monthly API contract.
+- Added isolated cross-store deletion tests for namespace isolation, shared-expert
+  protection, stale vector cleanup, and SQLite rollback when Qdrant fails.
+- Verified the complete Python suite, FastAPI integration suite, frontend type check,
+  production build, and desktop/mobile browser behavior for the release.
+
+## [0.2.3] - 2026-08-12
+
+### Milestone: Intelligent Expert Platform
+
+### Added
+
+- Rebuilt `expert_platform/` as a routed Vue 3 and TypeScript frontend with a FastAPI backend.
+- Added explicit HTTP contracts for authentication, experts, documents, grounded chat, notes, session statistics, and real-Q&A reports.
+- Added durable hashed web sessions, streamed upload staging, safe API error boundaries, backend integration tests, and desktop/mobile browser QA.
+
+### Changed
+
+- Repositioned the user-facing product from a knowledge-base manager to an intelligent expert platform: users assemble experts, supply source material, ask source-grounded questions, and preserve expert-scoped notes.
+- Kept `apps.pdf_learning_assistant.PDFLearningAssistant` as the shared application service so Gradio and the separated API execute the same `hello_agents_framework` memory, RAG, LLM, and storage paths.
+
+### Release boundary
+
+- The Gradio entry point remains supported and unchanged.
+- Web sessions are durable, while assistant objects, conversations, and current-session counters remain process-local.
+- Production SSO, account recovery, RBAC, CSRF tokens, rate limiting, audit logging, distributed jobs, and deployment automation remain outside this learning release.
+
 ## [0.2.2] - 2026-08-09
 
 ### Fixed
